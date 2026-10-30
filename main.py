@@ -1445,8 +1445,25 @@ button{font-family:inherit}
 @media(max-width:380px){.tap-stats{gap:5px}.tap-stats>div{padding:9px 4px}.tap-stats small{font-size:7px}.tap-stats b{font-size:10px}.feature-banner{padding:17px}.feature-orb{width:62px;height:62px;font-size:30px}.hero{padding:16px}}
 @media(prefers-reduced-motion:reduce){.orb,.halo,.coinw,.coin:after,.gift{animation:none!important}}
 
+/* LIVING NEBULA BACKGROUND — decorative, lightweight and always behind content */
+#bg{z-index:0;pointer-events:none;isolation:isolate;}
+#bg:after{content:"";position:absolute;inset:-35%;z-index:0;pointer-events:none;background:conic-gradient(from 0deg at 50% 50%,transparent 0deg,rgba(73,225,205,.055) 48deg,transparent 105deg,rgba(194,244,105,.045) 190deg,transparent 260deg,rgba(130,151,255,.05) 320deg,transparent 360deg);filter:blur(34px);animation:nebula-turn 48s linear infinite}
+.bg-aurora{position:absolute;inset:-20%;z-index:0;pointer-events:none;opacity:.42;filter:blur(42px);background:linear-gradient(115deg,transparent 20%,rgba(46,207,190,.10) 38%,transparent 52%,rgba(179,151,255,.075) 68%,transparent 82%);background-size:220% 220%;animation:aurora-drift 23s ease-in-out infinite alternate}
+.bg-stars{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.58;background-image:radial-gradient(1.5px 1.5px at 8% 17%,rgba(220,255,242,.75) 50%,transparent 100%),radial-gradient(1px 1px at 23% 73%,rgba(201,243,106,.8) 50%,transparent 100%),radial-gradient(2px 2px at 41% 31%,rgba(255,255,255,.55) 50%,transparent 100%),radial-gradient(1px 1px at 64% 82%,rgba(84,228,210,.8) 50%,transparent 100%),radial-gradient(1.5px 1.5px at 82% 23%,rgba(255,255,255,.7) 50%,transparent 100%),radial-gradient(1px 1px at 93% 61%,rgba(201,243,106,.7) 50%,transparent 100%);background-size:390px 360px;animation:star-drift 38s linear infinite}
+.bg-ring{position:absolute;z-index:0;left:50%;top:48%;width:min(112vw,820px);aspect-ratio:1;border:1px solid rgba(105,226,211,.075);border-radius:50%;transform:translate(-50%,-50%) rotate(-18deg);box-shadow:0 0 70px rgba(66,211,196,.035),inset 0 0 70px rgba(66,211,196,.025);animation:ring-float 19s ease-in-out infinite}
+.bg-ring:before,.bg-ring:after{content:"";position:absolute;inset:9%;border:1px solid rgba(201,243,106,.055);border-radius:50%;transform:rotate(35deg) scaleX(1.2)}
+.bg-ring:after{inset:20%;border-color:rgba(169,160,255,.065);transform:rotate(-48deg) scaleX(1.35)}
+.bg-spark{position:absolute;z-index:1;left:16%;top:28%;width:4px;height:4px;border-radius:50%;background:#c9f36a;box-shadow:0 0 9px 2px rgba(201,243,106,.55),120px 170px 0 0 rgba(84,228,210,.85),120px 170px 8px 1px rgba(84,228,210,.35),min(72vw,520px) 80px 0 0 rgba(255,255,255,.65),min(72vw,520px) 80px 9px 1px rgba(255,255,255,.25);animation:spark-float 12s ease-in-out infinite alternate}
+@keyframes nebula-turn{to{transform:rotate(360deg)}}
+@keyframes aurora-drift{0%{transform:translate3d(-3%,1%,0) rotate(-8deg);background-position:0% 40%}100%{transform:translate3d(4%,-2%,0) rotate(8deg);background-position:100% 60%}}
+@keyframes star-drift{0%{transform:translate3d(0,0,0)}100%{transform:translate3d(-28px,18px,0)}}
+@keyframes ring-float{0%,100%{transform:translate(-50%,-50%) rotate(-18deg) scale(.97)}50%{transform:translate(-50%,-50%) rotate(-8deg) scale(1.035)}}
+@keyframes spark-float{0%{transform:translate3d(0,0,0);opacity:.45}100%{transform:translate3d(12px,-24px,0);opacity:.95}}
+@media(max-width:600px){.orb{filter:blur(78px);opacity:.48}.bg-ring{width:145vw;top:43%}.bg-aurora{opacity:.27}.bg-stars{opacity:.42}}
+@media(prefers-reduced-motion:reduce){#bg:after,.bg-aurora,.bg-stars,.bg-ring,.bg-spark{animation:none!important}}
+
 </style></head><body>
-<div id="bg"><div class="orb o1"></div><div class="orb o2"></div></div>
+<div id="bg"><div class="bg-aurora"></div><div class="bg-stars"></div><div class="bg-ring"></div><div class="bg-spark"></div><div class="orb o1"></div><div class="orb o2"></div></div>
 <div id="view"></div><nav id="nav"></nav><div id="sheet"><div class="sh" id="shc"></div></div><div id="toast"></div>
 <script>
 const tg=Telegram.WebApp;tg.ready();tg.expand();
