@@ -33,8 +33,7 @@ SETDEF = [
     ("start_bonus", "Yangi foydalanuvchi bonusi", "1000", "int", "Mukofotlar"),
     ("ref_reward", "Do‘st taklif qilgan uchun mukofot", "1000", "int", "Mukofotlar"),
     ("ref_new", "Taklif orqali kelgan do‘stga qo‘shimcha", "500", "int", "Mukofotlar"),
-    ("daily_base", "Kunlik bonus — 1-kun", "100", "int", "Mukofotlar"),
-    ("daily_step", "Kunlik bonus — har kunga qo‘shimcha", "100", "int", "Mukofotlar"),
+    ("daily_base", "Kunlik bonus — har kuni", "200", "int", "Mukofotlar"),
     ("base_energy", "Boshlang‘ich energiya", "200", "int", "O‘yin"),
     ("energy_step", "Energiya upgrade qadami", "100", "int", "O‘yin"),
     ("max_lvl", "Upgrade maksimal darajasi", "12", "int", "O‘yin"),
@@ -149,6 +148,10 @@ create table if not exists svcs(id integer primary key autoincrement,plat text,s
         DB.execute("update users set earned=balance where earned=0 or earned is null")
         for k, _, d, _, _ in SETDEF:
             DB.execute("insert or ignore into settings values(?,?)", (k, d))
+        # Old default daily rewards were 100, 200, ...; migrate those defaults to a fixed 200/day.
+        # If an admin customized either value, leave that choice untouched.
+        DB.execute("update settings set v='200' where k='daily_base' and v='100'")
+        DB.execute("update settings set v='0' where k='daily_step' and v='100'")
         if not DB.execute("select 1 from plats").fetchone():
             for i, (pk, pt, pi, items) in enumerate(SEED_SERV):
                 DB.execute("insert into plats(slug,title,icon,sort) values(?,?,?,?)", (pk, pt, pi, i))
@@ -262,8 +265,9 @@ def daily_info(u):
     avail = last != t
     if avail and last != y:
         st = 0
-    b, s = si("daily_base"), si("daily_step")
-    rw = [b + s * i for i in range(6)] + [2 * (b + s * 6)]
+    b = max(0, si("daily_base"))
+    # Kunlik mukofot doim bir xil: har kuni 200 coin (admin sozlamasidan o‘zgartirilishi mumkin).
+    rw = [b] * 7
     dn = (st % 7) if avail else (((st - 1) % 7) + 1 if st else 0)
     return dict(avail=avail, streak=st, done=dn, rewards=rw)
 
