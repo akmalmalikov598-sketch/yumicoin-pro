@@ -1462,6 +1462,20 @@ button{font-family:inherit}
 @media(max-width:600px){.orb{filter:blur(78px);opacity:.48}.bg-ring{width:145vw;top:43%}.bg-aurora{opacity:.27}.bg-stars{opacity:.42}}
 @media(prefers-reduced-motion:reduce){#bg:after,.bg-aurora,.bg-stars,.bg-ring,.bg-spark{animation:none!important}}
 
+/* ═══════ BRIGHTER + FASTER LIVING BACKGROUND ═══════ */
+#bg{background:radial-gradient(ellipse at 12% 4%,rgba(55,235,218,.30),transparent 43%),radial-gradient(ellipse at 92% 78%,rgba(184,224,91,.22),transparent 44%),radial-gradient(ellipse at 70% 12%,rgba(133,113,255,.16),transparent 42%),linear-gradient(150deg,#10263b 0%,#0a1729 52%,#101d2c 100%)}
+#bg:before{opacity:.045}
+.orb{filter:blur(82px);opacity:.82;animation-duration:9s}
+.o1{background:rgba(54,239,218,.40)}
+.o2{background:rgba(201,243,106,.29);animation-duration:11s}
+.bg-aurora{opacity:.68;filter:blur(34px);background:linear-gradient(115deg,transparent 12%,rgba(46,230,210,.20) 34%,transparent 49%,rgba(179,151,255,.16) 66%,transparent 84%);background-size:220% 220%;animation-duration:11s}
+.bg-stars{opacity:.78;background-image:radial-gradient(2px 2px at 8% 17%,rgba(235,255,249,.95) 50%,transparent 100%),radial-gradient(1.5px 1.5px at 23% 73%,rgba(218,255,125,.95) 50%,transparent 100%),radial-gradient(2px 2px at 41% 31%,rgba(255,255,255,.85) 50%,transparent 100%),radial-gradient(1.5px 1.5px at 64% 82%,rgba(84,255,230,.95) 50%,transparent 100%),radial-gradient(2px 2px at 82% 23%,rgba(255,255,255,.9) 50%,transparent 100%),radial-gradient(1.5px 1.5px at 93% 61%,rgba(218,255,125,.9) 50%,transparent 100%);animation-duration:18s}
+.bg-ring{border-color:rgba(105,246,226,.16);box-shadow:0 0 95px rgba(66,235,216,.09),inset 0 0 90px rgba(66,235,216,.07);animation-duration:11s}
+.bg-ring:before{border-color:rgba(218,255,125,.12)}.bg-ring:after{border-color:rgba(169,160,255,.14)}
+.bg-spark{width:5px;height:5px;background:#e0ff83;box-shadow:0 0 13px 3px rgba(218,255,125,.8),120px 170px 0 0 rgba(84,255,230,.95),120px 170px 12px 2px rgba(84,228,210,.55),min(72vw,520px) 80px 0 0 rgba(255,255,255,.9),min(72vw,520px) 80px 12px 2px rgba(255,255,255,.45);animation-duration:6s}
+@media(max-width:600px){.orb{filter:blur(68px);opacity:.7}.bg-ring{width:145vw;top:43%}.bg-aurora{opacity:.48}.bg-stars{opacity:.65}}
+@media(prefers-reduced-motion:reduce){.orb{animation:none!important}}
+
 </style></head><body>
 <div id="bg"><div class="bg-aurora"></div><div class="bg-stars"></div><div class="bg-ring"></div><div class="bg-spark"></div><div class="orb o1"></div><div class="orb o2"></div></div>
 <div id="view"></div><nav id="nav"></nav><div id="sheet"><div class="sh" id="shc"></div></div><div id="toast"></div>
