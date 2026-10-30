@@ -733,7 +733,7 @@ const ok=()=>{try{tg.HapticFeedback.notificationOccurred('success')}catch(e){}};
 const mc=()=>`<i class="mc">${esc(CFG.ch)}</i>`;
 const view=(h,keep)=>{const v=$('#view'),s=v.scrollTop;v.innerHTML=h;v.scrollTop=keep?s:0};
 const av=cls=>USER.photo_url?`<img class="av ${cls}" src="${esc(USER.photo_url)}">`:`<div class="av ${cls}">${esc((S.name||'?')[0])}</div>`;
-const top=()=>`<div class="top"><div class="pill">${av('')}<b id="tbal">${K(S.balance)}</b>${mc()}</div></div>`;
+const tbar=()=>`<div class="top"><div class="pill">${av('')}<b id="tbal">${K(S.balance)}</b>${mc()}</div></div>`;
 const hd=(t,fn)=>`<div class="hd"><button class="bk" onclick="${fn}">←</button><span>${t}</span></div>`;
 const sheet=h=>{$('#shc').innerHTML=h;$('#sheet').classList.add('on')};
 const closeSheet=()=>$('#sheet').classList.remove('on');
@@ -772,7 +772,7 @@ const KI={link:'🔗',channel:'✈️',ad:'🎬',youtube:'▶️'},KL={ad:'Ko‘
 const lbl=t=>{const s=TT[t.id];if(!s)return KL[t.kind]||'Bajarish';const r=Math.ceil((s.at-Date.now())/1000);return r>0?r+'s':(t.kind==='channel'?'Tekshirish':'Olish')};
 async function taskV(){TK=await api('/api/tasks');trk()}
 function trk(keep){const o=TK.filter(t=>!t.done).length,l=TK.slice().sort((a,b)=>a.done-b.done);
- view(top()+`<div class="card row"><div class="ic">👥</div><div class="gr"><b>Do‘stlarni taklif qiling</b><small>Har biri uchun +${N(CFG.ref)} ${mc()} · taklif qilingan: ${S.refs}</small></div><button class="btn gold" onclick="inv()">Taklif</button></div>
+ view(tbar()+`<div class="card row"><div class="ic">👥</div><div class="gr"><b>Do‘stlarni taklif qiling</b><small>Har biri uchun +${N(CFG.ref)} ${mc()} · taklif qilingan: ${S.refs}</small></div><button class="btn gold" onclick="inv()">Taklif</button></div>
  <h3>Vazifalar <span class="badge">${o}</span></h3>`+(l.map(t=>`<div class="card row"><div class="ic">${KI[t.kind]||'⭐'}</div><div class="gr"><b>${esc(t.title)}</b><small>+${N(t.reward)} ${mc()}${t.limit?` · ${t.cnt}/${t.limit}`:''}</small></div>${t.done?'<span class="ok">✓ Bajarildi</span>':`<button class="btn" id="tk${t.id}" onclick="tdo(${t.id})">${lbl(t)}</button>`}</div>`).join('')||'<p class="mut c">Hozircha vazifa yo‘q</p>'),keep)}
 function inv(){const l=`https://t.me/${CFG.bot}?start=ref_${S.id}`;tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(l)}&text=${encodeURIComponent('🎁 Tanga yig‘ing, auksionda sovg‘alar yuting! Qo‘shiling:')}`)}
 let adsL=null;const loadAds=()=>adsL||(adsL=new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://sad.adsgram.ai/js/sad.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s)}));
@@ -790,7 +790,7 @@ setInterval(()=>{for(const id in TT){const b=$('#tk'+id),t=TK.find(x=>x.id==id);
 async function boostV(){
  const [sv,od]=await Promise.all([api('/api/services'),api('/api/orders')]);SV=sv;
  const up=[['tap','👆','Bosish kuchi',`+${S.power} → +${S.power+1}`],['energy','🔋','Energiya hajmi',`${S.max} → ${S.max+100}`],['regen','⚡','Tiklanish tezligi',`${S.regen}/s → ${S.regen+1}/s`]];
- view(top()+`<h3>Kuchaytirish</h3>`+up.map(([k,i,t,d])=>{const c=S.cost[k];return `<div class="card row"><div class="ic">${i}</div><div class="gr"><b>${t}</b><small>Daraja ${S.lv[k]} · ${c===null?'MAX':d}</small></div>${c===null?'':`<button class="btn gold" onclick="upg('${k}')">${N(c)} ${mc()}</button>`}</div>`}).join('')
+ view(tbar()+`<h3>Kuchaytirish</h3>`+up.map(([k,i,t,d])=>{const c=S.cost[k];return `<div class="card row"><div class="ic">${i}</div><div class="gr"><b>${t}</b><small>Daraja ${S.lv[k]} · ${c===null?'MAX':d}</small></div>${c===null?'':`<button class="btn gold" onclick="upg('${k}')">${N(c)} ${mc()}</button>`}</div>`}).join('')
  +`<h3>Xizmatlar</h3>`+Object.entries(SV).map(([k,p])=>`<div class="card row click" onclick="plat('${k}')"><div class="ic">${p.i}</div><b class="gr">${esc(p.t)}</b><span>›</span></div>`).join('')
  +(od.length?`<h3>Buyurtmalarim</h3>`+od.map(o=>`<div class="card row sp"><div class="gr"><b>#${o.id} ${esc(o.title)}</b><small>${N(o.qty)} ta · ${N(o.cost)} ${CFG.coin}</small></div><span class="${o.status==='done'?'ok':o.status==='cancel'?'bad':''}">${{pending:'⏳ Kutilmoqda',done:'✓ Bajarildi',cancel:'Bekor'}[o.status]}</span></div>`).join(''):''))}
 async function upg(k){try{const r=await api('/api/upgrade',{k});Object.assign(S,r);ok();toast('Kuchaytirildi! 🔥');boostV()}catch(e){toast(e.message)}}
@@ -810,7 +810,7 @@ async function order(){const link=$('#lk').value.trim();if(link.length<4)return 
 
 /* AUKSION */
 async function auV(){AU=await api('/api/auctions');auR()}
-function auR(keep){view(top()+(AU.map(a=>`<div class="card au click" onclick="auO(${a.id})"><div class="img" style="${a.image?`background-image:url('${esc(a.image)}')`:''}"><button class="hp ${a.liked?'on':''}" onclick="event.stopPropagation();lk(${a.id})">${a.liked?'♥':'♡'} ${a.likes}</button>${a.done?'<span class="ended">Yakunlangan</span>':''}</div><div class="ai"><b>${esc(a.title)}</b><div class="row sp"><span><b>${N(a.price)}</b> ${mc()} <small>/ bilet</small></span>${a.done?`<span class="ok">🏆 ${esc(a.winner_name||'—')}</span>`:`<span class="ok cd" data-e="${a.ends}">${cd(a.ends)}</span>`}</div></div></div>`).join('')||'<p class="mut c" style="margin-top:40px">Hozircha auksion yo‘q</p>'),keep)}
+function auR(keep){view(tbar()+(AU.map(a=>`<div class="card au click" onclick="auO(${a.id})"><div class="img" style="${a.image?`background-image:url('${esc(a.image)}')`:''}"><button class="hp ${a.liked?'on':''}" onclick="event.stopPropagation();lk(${a.id})">${a.liked?'♥':'♡'} ${a.likes}</button>${a.done?'<span class="ended">Yakunlangan</span>':''}</div><div class="ai"><b>${esc(a.title)}</b><div class="row sp"><span><b>${N(a.price)}</b> ${mc()} <small>/ bilet</small></span>${a.done?`<span class="ok">🏆 ${esc(a.winner_name||'—')}</span>`:`<span class="ok cd" data-e="${a.ends}">${cd(a.ends)}</span>`}</div></div></div>`).join('')||'<p class="mut c" style="margin-top:40px">Hozircha auksion yo‘q</p>'),keep)}
 setInterval(()=>document.querySelectorAll('.cd').forEach(e=>e.textContent=cd(+e.dataset.e)),1000);
 async function lk(id){const a=AU.find(x=>x.id==id);a.liked=a.liked?0:1;a.likes+=a.liked?1:-1;auR(1);hap();try{await api(`/api/auction/${id}/like`,{})}catch(e){}}
 function auO(id){const a=AU.find(x=>x.id==id);AQ={id,q:1,price:a.price};
