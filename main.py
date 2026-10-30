@@ -1246,6 +1246,55 @@ h2{margin:0}small{font-size:12px;color:var(--mut);font-weight:600}.mut{color:var
  .admin-head{padding:24px}
 }
 @media(prefers-reduced-motion:reduce){*{animation:none!important}}
+
+/* ═════════ NOVA UI REFRESH · 2026 ═════════ */
+:root{--ink:#070d19;--turq:#54e4d2;--turq2:#16b8aa;--gold:#c9f36a;--gold2:#9bc83d;--cream:#f2ffd8;--coral:#ff718c;--vio:#a895ff;--blue:#6abaff;--tx:#f4f7fb;--mut:#91a2b8;--bd:rgba(183,205,232,.13);--card:linear-gradient(145deg,rgba(22,36,57,.94),rgba(12,23,40,.94))}
+html,body{background:#070d19;color:var(--tx);font-family:'Manrope',sans-serif}
+#bg{background:radial-gradient(65% 42% at 4% 0%,rgba(30,181,170,.16),transparent 75%),radial-gradient(60% 42% at 100% 100%,rgba(139,168,67,.11),transparent 70%),linear-gradient(145deg,#0a1423,#070d19 62%,#0b1422)}
+#bg:before{opacity:.025}.orb{filter:blur(90px);opacity:.6}
+#view{padding-top:calc(env(safe-area-inset-top) + 16px);padding-left:16px;padding-right:16px;scrollbar-width:none}
+.card{background:linear-gradient(145deg,rgba(20,35,56,.94),rgba(12,23,39,.96));border:1px solid rgba(167,193,225,.12);border-radius:20px;padding:15px;box-shadow:0 12px 28px rgba(0,0,0,.16),inset 0 1px 0 rgba(255,255,255,.035);backdrop-filter:blur(18px)}
+.ic{border-radius:14px;background:linear-gradient(145deg,#1d344c,#13243a);border:1px solid rgba(255,255,255,.07)}
+.btn{border-radius:13px;background:#1b2b40;border:1px solid rgba(180,204,232,.15);transition:transform .16s,filter .16s,background .16s}
+.btn:hover{filter:brightness(1.12)}.btn.gold{background:linear-gradient(135deg,#d8fa82,#a9d64e);color:#17230a;box-shadow:0 8px 22px rgba(169,214,78,.18)}
+.btn.tq{background:linear-gradient(135deg,#6cebd9,#21b7a9);color:#06211f;box-shadow:0 8px 22px rgba(33,183,169,.16)}
+.btn.red{background:rgba(255,91,120,.1);border-color:rgba(255,91,120,.24);color:#ff9aaa}
+.inp{border-radius:13px;background:#0a1524;border:1px solid rgba(174,199,229,.15);color:#f5f8fc}.inp:focus{border-color:#54e4d2;box-shadow:0 0 0 3px rgba(84,228,210,.1)}
+h3{font-size:14px;letter-spacing:.1px}.hd{font-size:17px}
+/* Admin header and navigation */
+.admin-head{position:relative;overflow:hidden;padding:22px 20px;border-radius:25px;margin:0 0 16px;background:radial-gradient(ellipse at 95% 0%,rgba(84,228,210,.17),transparent 45%),linear-gradient(135deg,#172c42 0%,#101d30 58%,#13251f 100%);border:1px solid rgba(84,228,210,.18);box-shadow:0 18px 42px rgba(0,0,0,.25)}
+.admin-head:after{content:'✦';position:absolute;right:18px;top:20px;font-size:68px;line-height:1;color:rgba(201,243,106,.09);pointer-events:none}
+.admin-head .eyebrow{display:inline-flex;align-items:center;gap:7px;padding:6px 9px;border-radius:8px;background:rgba(84,228,210,.09);border:1px solid rgba(84,228,210,.16);font-size:9px;letter-spacing:1.4px;color:#7ceadd}
+.admin-head .eyebrow:before{content:'';width:6px;height:6px;border-radius:50%;background:#75edb4;box-shadow:0 0 10px #75edb4}
+.admin-head h2{font:800 clamp(20px,5vw,25px) 'Unbounded';letter-spacing:-.8px;margin:13px 0 8px;max-width:85%}
+.admin-head p{max-width:520px;font-size:12px;line-height:1.7;color:#a9bbcd}
+.admin-head .admin-actions{position:relative;z-index:1;margin-top:18px;gap:9px}.admin-head .admin-actions .btn{flex:0 1 auto;min-width:130px;padding:11px 14px}
+.atabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 18px;padding:0;overflow:visible}
+.at{position:relative;display:flex;flex-direction:column;gap:5px;align-items:flex-start;justify-content:center;min-height:64px;padding:10px 11px;border-radius:15px;border:1px solid rgba(165,190,220,.12);background:linear-gradient(145deg,rgba(22,38,59,.95),rgba(13,25,42,.95));color:#9bacc0;font:800 10px 'Manrope';white-space:normal;text-align:left;line-height:1.2;transition:all .16s}
+.at:first-letter{font-size:16px}.at.on{color:#dfff9b;background:linear-gradient(145deg,rgba(89,124,45,.26),rgba(28,54,43,.55));border:1px solid rgba(201,243,106,.43);box-shadow:0 7px 22px rgba(0,0,0,.18),inset 0 0 0 1px rgba(201,243,106,.06)}
+.at.on:after{content:'';position:absolute;left:11px;right:11px;bottom:5px;height:2px;border-radius:2px;background:#c9f36a}
+.admin-section-title{margin:21px 2px 10px}.admin-section-title b{font:800 12px 'Unbounded';letter-spacing:.1px;color:#e8f1fb}.admin-section-title small{font-size:10px;color:#8295ab}
+.admin-tip{padding:13px 14px;border-radius:15px;background:rgba(84,228,210,.065);border:1px solid rgba(84,228,210,.15);color:#b5d9d7;font-size:11px;line-height:1.65}
+.admin-item{min-height:70px;margin-bottom:8px;cursor:pointer}.admin-item:hover{border-color:rgba(84,228,210,.3);transform:translateY(-1px)}.admin-item .ic{width:43px;height:43px}.admin-item .gr b{font-size:13px}.admin-item .gr small{font-size:10px;line-height:1.45}.admin-item>span{width:30px;height:30px;display:grid;place-items:center;border-radius:10px;background:rgba(84,228,210,.08);color:#72dfd2}
+.admin-empty{padding:30px 16px;background:rgba(255,255,255,.018);border:1px dashed rgba(165,190,220,.2);border-radius:18px;line-height:1.7}
+.addb{border:1px dashed rgba(201,243,106,.38);background:rgba(201,243,106,.065);color:#d9f99a;border-radius:15px;padding:14px;font-size:12px;letter-spacing:.1px;transition:.15s}.addb:active{transform:scale(.985)}
+.sg{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.sg .card{position:relative;overflow:hidden;min-height:100px;padding:14px;border-radius:17px}.sg .card:after{content:'';position:absolute;width:65px;height:65px;right:-20px;bottom:-28px;border-radius:50%;background:rgba(84,228,210,.06)}.sg .card small{font-size:10px;line-height:1.4}.sg .n{font:800 clamp(17px,4vw,21px) 'Unbounded';margin-top:12px;color:#e8f5fa;overflow-wrap:anywhere}
+.bars{height:125px}.bars i{border-radius:7px 7px 2px 2px;background:linear-gradient(180deg,#79ead9,#278f91)}
+#ac{min-height:160px}.ac .card{margin-bottom:9px}
+#sheet{align-items:flex-end;background:rgba(2,8,16,.76);backdrop-filter:blur(9px)}.sh{max-width:680px;margin:0 auto;max-height:92vh;padding:14px 20px calc(env(safe-area-inset-bottom) + 24px);background:linear-gradient(180deg,#14283e,#0b1728);border:1px solid rgba(166,195,225,.16);border-bottom:0;border-radius:26px 26px 0 0;box-shadow:0 -18px 60px rgba(0,0,0,.32)}
+.sh h3{font:800 15px 'Unbounded';margin:5px 0 18px}.fg{margin:14px 0}.fg label{color:#aebfd1;font-size:11px;letter-spacing:.1px}.inp{min-height:48px;font-size:14px}.fg textarea.inp{min-height:110px}
+#toast{background:#14283d;border-color:rgba(84,228,210,.25);box-shadow:0 12px 35px rgba(0,0,0,.4)}
+@media(min-width:700px){
+ #view{max-width:1120px;padding-left:28px;padding-right:28px}
+ .admin-head{padding:28px 30px}.admin-head h2{font-size:27px}
+ .atabs{grid-template-columns:repeat(6,minmax(0,1fr));gap:9px}
+ .at{min-height:72px;padding:12px 13px;font-size:11px}
+ .sg{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+ .admin-item{padding:16px}
+}
+@media(max-width:380px){.atabs{grid-template-columns:repeat(2,minmax(0,1fr))}.at{min-height:54px;flex-direction:row;align-items:center}.admin-head{padding:18px}.admin-head h2{font-size:19px}}
+@media(prefers-reduced-motion:reduce){.admin-item,.btn{transition:none}}
+
 </style></head><body>
 <div id="bg"><div class="orb o1"></div><div class="orb o2"></div></div>
 <div id="view"></div><nav id="nav"></nav><div id="sheet"><div class="sh" id="shc"></div></div><div id="toast"></div>
@@ -1394,7 +1443,7 @@ const ADM={
 };
 const AT=[['dash','📊','Statistika'],['set','⚙️','Sozlamalar'],['tasks','🎯','Vazifalar'],['auctions','🏆','Auksion'],['promos','🎟','Promokod'],['svcs','🚀','Xizmatlar'],['orders','🛒','Buyurtmalar'],['users','👥','Foydalanuvchilar'],['bc','📣','Xabar'],['paid','💎','Pullik'],['admins','🛡','Adminlar'],['bk','💾','Zaxira']];
 function admV(t){clearInterval(BCT);if(t)ADT=t;
- view(`<div class="admin-head"><div class="eyebrow">CONTROL CENTER · OWNER ACCESS</div><h2>⚙️ Boshqaruv markazi</h2><p>Bot, Mini App, foydalanuvchilar, mukofotlar, xizmatlar va barcha kontentni bitta joydan boshqaring.</p><div class="admin-actions"><button class="btn tq" onclick="admV('dash')">📊 Umumiy holat</button><button class="btn" onclick="admV('set')">🛠 Bot sozlamalari</button></div></div><div class="atabs">${AT.map(([k,i,l])=>`<button class="at ${k===ADT?'on':''}" onclick="admV('${k}')">${i} ${l}</button>`).join('')}</div><div id="ac"><div class="spn"></div></div>`);
+ view(`<div class="admin-head"><div class="eyebrow">OWNER WORKSPACE · LIVE CONTROL</div><h2>Boshqaruv markazi</h2><p>Botning barcha muhim bo‘limlari shu yerda. Foydalanuvchilar, balanslar, vazifalar, xizmatlar, buyurtmalar va ko‘rinadigan matnlarni boshqaring.</p><div class="admin-actions"><button class="btn tq" onclick="admV('dash')">▦ Umumiy ko‘rsatkichlar</button><button class="btn" onclick="admV('set')">⚙ Barcha sozlamalar</button></div></div><div class="atabs">${AT.map(([k,i,l])=>`<button class="at ${k===ADT?'on':''}" onclick="admV('${k}')">${i} ${l}</button>`).join('')}</div><div id="ac"><div class="spn"></div></div>`);
  admT(ADT).catch(e=>toast(e.message))}
 async function admT(t){ADT=t;const c=$('#ac');if(!c)return;
  if(t==='dash'){const d=await api('/api/adm/dash'),mx=Math.max(1,...d.ser.map(s=>s[1]));
