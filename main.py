@@ -264,6 +264,45 @@ with LK:
     if not DB.execute('select 1 from tournaments').fetchone():
         now=time.time(); DB.execute('insert into tournaments(title,descr,starts,ends,active,reward) values(?,?,?,?,1,?)',('NEON TAP CUP','Energiya bilan haqiqiy o‘yin bosishlari orqali ochko yig‘ing. Kunlik limit: 500 ochko. TOP-3 sovrin oladi.',now,now+7*86400,5000))
 
+# ── REAL CHANNEL GROWTH / PUBLISHING / MONETIZATION ──
+with LK:
+    DB.executescript("""
+    create table if not exists growth_channels(
+      chat_id text primary key, username text default '', title text default '', invite_url text default '',
+      require_sub integer default 0, active integer default 1, added real);
+    create table if not exists growth_posts(
+      id integer primary key autoincrement, chat_id text, body text, photo text default '',
+      button_text text default '', button_url text default '', publish_at real,
+      status text default 'queued', created real, sent_at real, error text default '');
+    create table if not exists growth_snapshots(
+      chat_id text, day text, members integer, sampled real, primary key(chat_id,day));
+    create table if not exists growth_campaigns(
+      id integer primary key autoincrement, title text, code text unique, active integer default 1, created real);
+    create table if not exists growth_campaign_events(
+      campaign_id integer, user_id integer, created real, primary key(campaign_id,user_id));
+    create table if not exists growth_referrals(
+      invitee_id integer primary key, referrer_id integer, status text default 'pending', created real, credited real);
+    create table if not exists growth_ad_offers(
+      id integer primary key autoincrement, title text, descr text default '', stars integer,
+      active integer default 1, created real);
+    create table if not exists growth_ad_orders(
+      id integer primary key autoincrement, user_id integer, offer_id integer, payload text unique,
+      stars integer, status text default 'paid_review', created real, published real default 0,
+      content text default '');
+    """)
+    try: DB.execute("alter table growth_ad_orders add column content text default ''")
+    except sqlite3.OperationalError: pass
+    try: DB.execute("alter table growth_channels add column invite_url text default ''")
+    except sqlite3.OperationalError: pass
+    # Old default engagement-selling catalogue is disabled: no fake subscribers/views/likes are sold.
+    DB.execute("update svcs set active=0 where slug in ('sub','view','react','follow','like') and plat in ('telegram','instagram','tiktok')")
+    DB.execute("update tasks set active=0 where kind!='channel'")
+    if not DB.execute('select 1 from growth_ad_offers').fetchone():
+        DB.executemany('insert into growth_ad_offers(title,descr,stars,active,created) values(?,?,?,?,?)',[
+          ('Kichik reklama','Bitta reklama posti. Joylash vaqti admin bilan kelishiladi.',100,1,time.time()),
+          ('Standart reklama','Bitta reklama posti va kanal auditoriyasi bo‘yicha qisqa hisobot.',250,1,time.time()),
+          ('Premium reklama','Ikki reklama posti, vaqtini kelishish va natija hisoboti.',500,1,time.time())])
+
 # ───────────────────────── TELEGRAM ─────────────────────────
 BOT_USER = ""
 
@@ -348,14 +387,21 @@ def reg(uid, name, un, ref=None):
             return u, False
         ok = bool(ref and ref != uid and get(ref))
         now = time.time()
-        b = si("start_bonus") + (si("ref_new") if ok else 0)
+        needs_channel = bool(one("select count(*) from growth_channels where active=1 and require_sub=1"))
+        b = si("start_bonus") + (si("ref_new") if ok and not needs_channel else 0)
         x("insert into users(id,name,username,balance,earned,energy,energy_ts,ref_by,created,last_seen) values(?,?,?,?,?,?,?,?,?,?)",
           (uid, name, un, b, b, si("base_energy"), now, ref if ok else None, now, now))
         if ok:
-            gain(ref, si("ref_reward"))
             x("update users set refs=refs+1 where id=?", (ref,))
+            if needs_channel:
+                x("insert or ignore into growth_referrals(invitee_id,referrer_id,status,created) values(?,?,'pending',?)", (uid,ref,now))
+            else:
+                gain(ref, si("ref_reward"))
     if ok:
-        send(ref, f"🎉 <b>{_html.escape(name)}</b> havolangiz orqali qo‘shildi! +{si('ref_reward')} {coin()}")
+        if needs_channel:
+            send(ref, f"🎉 <b>{_html.escape(name)}</b> havolangiz orqali keldi. Kanal obunasini tasdiqlasa mukofot beriladi.")
+        else:
+            send(ref, f"🎉 <b>{_html.escape(name)}</b> havolangiz orqali qo‘shildi! +{si('ref_reward')} {coin()}")
     return get(uid), True
 
 
@@ -447,6 +493,10 @@ def auth(f):
             return jsonify(error="Avtorizatsiya xatosi"), 401
         tu, sp = v
         ref = int(sp[4:]) if sp.startswith("ref_") and sp[4:].isdigit() else None
+        if sp.startswith("camp_") and sp[5:].isdigit():
+            camp_id = int(sp[5:])
+            if q("select 1 from growth_campaigns where id=? and active=1",(camp_id,),True):
+                x("insert or ignore into growth_campaign_events(campaign_id,user_id,created) values(?,?,?)",(camp_id,tu["id"],time.time()))
         name = ((tu.get("first_name") or "") + " " + (tu.get("last_name") or "")).strip() or "User"
         u, _ = reg(tu["id"], name[:60], (tu.get("username") or "").lower(), ref)
         g.uid, g.adm = u["id"], is_admin(u["id"])
@@ -618,6 +668,8 @@ def t_claim(tid):
     t = q("select * from tasks where id=? and active=1", (tid,), True)
     if not t:
         raise Err("Vazifa topilmadi")
+    if t['kind'] != 'channel':
+        raise Err("Bu vazifa turi server orqali ishonchli tasdiqlanmaydi. Faqat haqiqiy Telegram kanal obunasi uchun mukofot beriladi.")
     c, d = tdone(g.uid, t)
     if c >= (t["daily_limit"] if t["daily_limit"] > 0 else 1):
         raise Err("Bu vazifa bajarilgan")
@@ -628,7 +680,7 @@ def t_claim(tid):
         m = tg("getChatMember", chat_id=t["chat_id"], user_id=g.uid)
         if m is None:
             raise Err("Tekshirib bo‘lmadi (bot kanalda admin bo‘lishi kerak)")
-        if m.get("status") not in ("member", "administrator", "creator"):
+        if m.get("status") not in ("member", "administrator", "creator") and not (m.get("status")=="restricted" and m.get("is_member")):
             raise Err("Avval kanalga obuna bo‘ling")
     with LK:
         c, d = tdone(g.uid, t)
@@ -822,8 +874,10 @@ def a_save(kind):
     for c in ("title", "code", "slug"):
         if c in vals and not vals[c]:
             raise Err("Nomi/kodi bo‘sh bo‘lmasin")
-    if kind == "tasks" and vals["kind"] not in ("link", "channel", "youtube", "ad"):
-        raise Err("Vazifa turi noto‘g‘ri")
+    if kind == "tasks" and vals["kind"] != "channel":
+        raise Err("Mukofotli vazifa faqat Telegram kanal obunasi bo‘lishi mumkin — server obunani haqiqiy tekshiradi")
+    if kind == "tasks" and (not vals.get("chat_id") or not vals.get("url")):
+        raise Err("Kanal chat ID va obuna havolasini kiriting")
     pk = K.get("pk", "id")
     cols = list(vals)
     with LK:
@@ -1082,11 +1136,15 @@ def on_msg(m):
     if text.startswith("/start"):
         parts = text.split()
         ref = int(parts[1][4:]) if len(parts) > 1 and parts[1].startswith("ref_") and parts[1][4:].isdigit() else None
+        if len(parts)>1 and parts[1].startswith("camp_") and parts[1][5:].isdigit():
+            cid=int(parts[1][5:])
+            if q("select 1 from growth_campaigns where id=? and active=1",(cid,),True):
+                x("insert or ignore into growth_campaign_events(campaign_id,user_id,created) values(?,?,?)",(cid,uid,time.time()))
         reg(uid, name[:60], (m["from"].get("username") or "").lower(), ref)
         send(uid, sv("welcome").replace("{name}", _html.escape(name)).replace("{coin}", coin()), webapp_kb())
         return
     if text.startswith("/help"):
-        send(uid, "✨ <b>Yordam markazi</b>\n\n🚀 <b>Mini App</b> — o‘yin, vazifalar, boost va auksionlar.\n💰 <b>Balans</b> — /balance orqali tangalaringizni ko‘ring.\n🆔 <b>ID</b> — /id orqali Telegram ID raqamingizni biling.\n🎁 <b>Bonus</b> — ilovadagi kunlik bonus va promokodlardan foydalaning.\n\nSavol yoki muammo bo‘lsa: @" + _html.escape(sv("admin_username").lstrip("@")), webapp_kb())
+        send(uid, "✨ <b>Yordam markazi</b>\n\n🚀 <b>Mini App</b> — o‘yin, vazifalar, boost va auksionlar.\n💰 <b>Balans</b> — /balance orqali tangalaringizni ko‘ring.\n🆔 <b>ID</b> — /id orqali Telegram ID raqamingizni biling.\n🎁 <b>Bonus</b> — ilovadagi kunlik bonus va promokodlardan foydalaning.\n📣 <b>/ads</b> — kanalga reklama joylash paketlari.\n\nSavol yoki muammo bo‘lsa: @" + _html.escape(sv("admin_username").lstrip("@")), webapp_kb())
         return
     if text.startswith("/balance"):
         u = get(uid)
@@ -1098,9 +1156,38 @@ def on_msg(m):
     if text.startswith("/id"):
         send(uid, f"🆔 <b>Telegram ID:</b> <code>{uid}</code>")
         return
+    if m.get("successful_payment"):
+        pay=m["successful_payment"]; payload=str(pay.get("invoice_payload",""))
+        if payload.startswith("ad:"):
+            od=q("select id,offer_id,stars,status from growth_ad_orders where payload=? and user_id=?",(payload,uid),True)
+            if od and od['status']=='invoice_created' and pay.get('currency')=='XTR' and int(pay.get('total_amount',0))==int(od['stars']):
+                x("update growth_ad_orders set status='paid_review' where payload=? and user_id=? and status='invoice_created'",(payload,uid))
+                off=q("select title from growth_ad_offers where id=?",(od['offer_id'],),True)
+                notify_admins(f"💳 <b>Yangi reklama to‘lovi</b>\nBuyurtma: #{od['id']}\nPaket: {_html.escape(off['title'] if off else 'Reklama')}\nTo‘lov: {od['stars']} ⭐\nMijoz: <code>{uid}</code>")
+                send(uid,"✅ To‘lov qabul qilindi! Endi reklamangiz matni va havolasini shu chatga bitta xabar qilib yuboring. Admin tekshirib, kelishilgan kanalga joylaydi.")
+        return
+    if text.startswith("/ads"):
+        offers=q("select * from growth_ad_offers where active=1 order by stars")
+        if not offers:
+            return send(uid,"Hozir reklama paketlari mavjud emas.")
+        send(uid,"📣 <b>AKCOIN reklama paketlari</b>\nTo‘lov Telegram Stars orqali amalga oshadi. To‘lovdan keyin reklama joylashuvi admin tekshiruvidan o‘tadi.")
+        for off in offers:
+            payload=f"ad:{off['id']}:{uid}:{time.time_ns()}"
+            x("insert or ignore into growth_ad_orders(user_id,offer_id,payload,stars,status,created) values(?,?,?,?, 'invoice_created',?)",(uid,off['id'],payload,off['stars'],time.time()))
+            tg("sendInvoice",chat_id=uid,title=off['title'][:32],description=off['descr'][:255],payload=payload,provider_token="",currency="XTR",prices=[{"label":off['title'][:32],"amount":int(off['stars'])}])
+        return
+    if text and not text.startswith('/'):
+        paid_order=q("select * from growth_ad_orders where user_id=? and status='paid_review' order by id desc limit 1",(uid,),True)
+        if paid_order:
+            x("update growth_ad_orders set content=?,status='content_received' where id=? and status='paid_review'",(text[:3500],paid_order['id']))
+            notify_admins(f"📨 <b>Reklama matni keldi</b>\nBuyurtma #{paid_order['id']} · foydalanuvchi <code>{uid}</code>\n{_html.escape(text[:500])}")
+            send(uid,"📨 Reklama matni qabul qilindi. Admin tekshiruvdan so‘ng joylaydi.")
+            return
     if not is_admin(uid):
         return
-    if text.startswith("/admin"):
+    if text.startswith("/growth"):
+        send(uid,"📈 <b>AKCOIN Growth Center</b>\nKanal, post rejalari, haqiqiy obunachi statistikasi va reklama buyurtmalari Mini App admin panelidagi Growth bo‘limida.",webapp_kb("📈 Growth Center", "/?admin=1&growth=1"))
+    elif text.startswith("/admin"):
         send(uid, "🛠 <b>Admin panel</b>\nBot to‘liq shu yerdan boshqariladi 👇", webapp_kb("⚙️ Admin panelni ochish", "/?admin=1"))
     elif m.get("photo"):
         fid = m["photo"][-1]["file_id"]
@@ -1139,7 +1226,7 @@ def poll():
     tg("deleteWebhook")
     off = 0
     while True:
-        r = tg("getUpdates", offset=off, timeout=25, allowed_updates=["message", "callback_query"])
+        r = tg("getUpdates", offset=off, timeout=25, allowed_updates=["message", "callback_query", "pre_checkout_query"])
         if r is None:
             time.sleep(3)
             continue
@@ -1150,6 +1237,11 @@ def poll():
                     on_msg(up["message"])
                 elif "callback_query" in up:
                     on_cb(up["callback_query"])
+                elif "pre_checkout_query" in up:
+                    pc=up["pre_checkout_query"]
+                    payload=str(pc.get("invoice_payload",""))
+                    od=q("select * from growth_ad_orders where payload=? and user_id=?",(payload,pc.get("from",{}).get("id")),True)
+                    tg("answerPreCheckoutQuery",pre_checkout_query_id=pc["id"],ok=bool(od and od['status']=='invoice_created'),error_message=None if od and od['status']=='invoice_created' else "Buyurtma topilmadi yoki to‘lov allaqachon ishlatilgan")
             except Exception:
                 log.exception("update")
 
@@ -1160,6 +1252,9 @@ def bg_loop():
         try:
             for a in q("select id from auctions where done=0 and ends<=?", (time.time(),)):
                 finish_auction(a["id"])
+            process_growth_queue()
+            if n % 20 == 0:
+                sample_growth_channels()
             if n % 10 == 0 and sv("smm_url") and sv("smm_key"):
                 for o in q("select * from orders where status='processing' and ext!=''"):
                     st = str((smm("status", order=o["ext"]) or {}).get("status", "")).lower()
@@ -1872,9 +1967,10 @@ async function dailyGo(){try{const r=await api('/api/daily',{});Object.assign(S,
 const KI={link:['🔗','t'],channel:['✈️','b'],ad:['🎬','g'],youtube:['▶️','c']},KL={ad:'Ko‘rish',channel:'Obuna',link:'Ochish',youtube:'O‘tish'};
 const lbl=t=>{const s=TT[t.id];if(!s)return KL[t.kind]||'Bajarish';const r=Math.ceil((s.at-Date.now())/1000);return r>0?r+'s':(t.kind==='channel'?'Tekshirish':'Olish')};
 async function taskV(){TK=await api('/api/tasks');trk()}
-function trk(keep){const o=TK.filter(t=>!t.done).length,l=TK.slice().sort((a,b)=>a.done-b.done);
- view(tbar()+`<div class="section-kicker"><span class="kicker-dot"></span> MISSIYALAR MARKAZI <span class="kicker-line"></span><b>${o} TA FAOL</b></div><div class="hero"><div class="f1"><b class="dsp">Do‘stlaringizni taklif qiling</b><div style="margin-top:6px"><small style="color:#cfeff0">Siz +${N(CFG.ref)} ${mc()} · do‘stingiz +${N(CFG.refnew)} ${mc()}<br>Taklif qilinganlar: <b>${S.refs}</b></small></div><button class="btn gold" onclick="inv()">Taklif qilish</button></div><div class="he">🎁</div></div>
+async function trk(keep){const o=TK.filter(t=>!t.done).length,l=TK.slice().sort((a,b)=>a.done-b.done);let rb='';try{const rr=await api('/api/growth/referral');if(rr.pending)rb=`<div class="card"><b>🔒 Referral mukofoti kutilmoqda</b><p><small>Mukofotni olish uchun quyidagi kanallarga haqiqiy obuna bo‘ling, keyin tekshirtiring.</small></p>${rr.channels.map(ch=>`<a class="btn tq wide" style="display:block;text-align:center;margin:6px 0" href="${ch.username?'https://t.me/'+encodeURIComponent(ch.username.replace('@','')):(ch.invite_url||'#')}" target="_blank">${esc(ch.title||ch.username||'Kanalga o‘tish')}</a>`).join('')}<button class="btn gold wide" onclick="verifyGrowthSub()">OBUNANI TEKSHIRISH</button></div>`}catch(e){};
+ view(tbar()+rb+`<div class="section-kicker"><span class="kicker-dot"></span> MISSIYALAR MARKAZI <span class="kicker-line"></span><b>${o} TA FAOL</b></div><div class="hero"><div class="f1"><b class="dsp">Do‘stlaringizni taklif qiling</b><div style="margin-top:6px"><small style="color:#cfeff0">Siz +${N(CFG.ref)} ${mc()} · do‘stingiz +${N(CFG.refnew)} ${mc()}<br>Taklif qilinganlar: <b>${S.refs}</b></small></div><button class="btn gold" onclick="inv()">Taklif qilish</button></div><div class="he">🎁</div></div>
  <h3>Vazifalar <span class="badge">${o}</span></h3>`+(l.map(t=>{const k=KI[t.kind]||['⭐','v'];return `<div class="card row ${t.done?'dim':''}"><div class="ic ${k[1]}">${k[0]}</div><div class="gr"><b>${esc(t.title)}</b><small>+${N(t.reward)} ${mc()}${t.limit?` · ${t.cnt}/${t.limit} bugun`:''}</small></div>${t.done?'<span class="ok">✓</span>':`<button class="btn" id="tk${t.id}" onclick="tdo(${t.id})">${lbl(t)}</button>`}</div>`}).join('')||'<p class="mut c">Hozircha vazifa yo‘q</p>'),keep)}
+async function verifyGrowthSub(){try{const r=await api('/api/growth/verify',{});toast(r.message||'Tasdiqlandi');await refresh();TK=await api('/api/tasks');trk()}catch(e){toast(e.message)}}
 function inv(){const l=`https://t.me/${CFG.bot}?start=ref_${S.id}`;tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(l)}&text=${encodeURIComponent('🎁 Tanga yig‘ing, auksionda sovg‘alar yuting! Qo‘shiling:')}`)}
 let adsL=null;const loadAds=()=>adsL||(adsL=new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://sad.adsgram.ai/js/sad.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s)}));
 async function tdo(id){const t=TK.find(x=>x.id==id);
@@ -1970,7 +2066,7 @@ const fld=([k,l,t,o],v)=>`<div class="fg"><label>${l}</label>`+(t==='sel'?`<sele
 const dtv=ts=>{const d=new Date(ts*1000);d.setMinutes(d.getMinutes()-d.getTimezoneOffset());return d.toISOString().slice(0,16)};
 const ON=[[1,'✅ Faol'],[0,'⏸ O‘chirilgan']];
 const ADM={
- tasks:{add:'Vazifa qo‘shish',pk:'id',def:{kind:'link',reward:100,daily_limit:0,sort:0,active:1},f:[['title','Nomi','text'],['kind','Turi','sel',[['link','🔗 Havola'],['channel','✈️ Kanalga obuna'],['youtube','▶️ YouTube'],['ad','🎬 Reklama ko‘rish']]],['reward','Mukofot','int'],['url','Havola (URL)','text'],['chat_id','Kanal (@username) — faqat «obuna» uchun. Bot kanalda admin bo‘lsin','text'],['daily_limit','Kunlik limit (0 = bir marta)','int'],['sort','Tartib raqami','int'],['active','Holati','sel',ON]],row:r=>[(KI[r.kind]||['⭐'])[0],r.title,`+${N(r.reward)} · ${r.kind}${r.daily_limit?' · kunlik '+r.daily_limit:''}`,r.active]},
+ tasks:{add:'Vazifa qo‘shish',pk:'id',def:{kind:'channel',reward:100,daily_limit:0,sort:0,active:1},f:[['title','Nomi','text'],['kind','Turi','sel',[['channel','✈️ Telegram kanal obunasi (haqiqiy tekshiruv)']]],['reward','Mukofot','int'],['url','Havola (URL)','text'],['chat_id','Kanal (@username) — faqat «obuna» uchun. Bot kanalda admin bo‘lsin','text'],['daily_limit','Kunlik limit (0 = bir marta)','int'],['sort','Tartib raqami','int'],['active','Holati','sel',ON]],row:r=>[(KI[r.kind]||['⭐'])[0],r.title,`+${N(r.reward)} · ${r.kind}${r.daily_limit?' · kunlik '+r.daily_limit:''}`,r.active]},
  auctions:{add:'Auksion qo‘shish',pk:'id',def:{price:100,image:''},f:[['title','Sovg‘a nomi','text'],['image','Rasm havolasi (botga rasm yuborib havola oling)','text'],['price','Bilet narxi','int'],['ends','Tugash vaqti','dt']],row:r=>['🏆',r.title,`${N(r.price)}/bilet · ${N(r.total)} bilet · ${r.players} kishi · ${r.done?'tugagan':cd(r.ends)}`,r.done?0:1],
   extra:r=>`<div class="row" style="margin-top:8px"><button class="btn f1" onclick="aPl(${r.id})">👥 Ishtirokchilar</button>${r.done?'':`<button class="btn tq f1" onclick="aFin(${r.id})">🏁 Hozir yakunlash</button>`}</div>`},
  promos:{add:'Promokod qo‘shish',pk:'code',man:1,def:{reward:500,max_uses:0},f:[['code','Kod','text'],['reward','Mukofot','int'],['max_uses','Limit (0 = cheksiz)','int']],row:r=>['🎟',r.code,`+${N(r.reward)} · ishlatilgan ${r.uses}/${r.max_uses||'∞'}`,1]},
@@ -1979,11 +2075,12 @@ const ADM={
  paid:{add:'Xizmat qo‘shish',pk:'id',def:{icon:'⭐',sort:0,active:1},f:[['icon','Emoji','text'],['title','Nomi','text'],['descr','Tavsif','text'],['sort','Tartib','int'],['active','Holati','sel',ON]],row:r=>[r.icon,r.title,r.descr,r.active]},
  admins:{add:'Admin qo‘shish',pk:'id',man:1,def:{},f:[['id','Telegram ID','int'],['note','Izoh (ism)','text']],row:r=>['🛡',r.note||('ID '+r.id),String(r.id),1]}
 };
-const AT=[['dash','📊','Statistika'],['set','⚙️','Sozlamalar'],['tasks','🎯','Vazifalar'],['auctions','🏆','Auksion'],['promos','🎟','Promokod'],['svcs','🚀','Xizmatlar'],['orders','🛒','Buyurtmalar'],['users','👥','Foydalanuvchilar'],['bc','📣','Xabar'],['paid','💎','Pullik'],['admins','🛡','Adminlar'],['world','🌌','World Control'],['bk','💾','Zaxira']];
+const AT=[['growth','📈','Growth Center'],['dash','📊','Statistika'],['set','⚙️','Sozlamalar'],['tasks','🎯','Vazifalar'],['auctions','🏆','Auksion'],['promos','🎟','Promokod'],['svcs','🚀','Xizmatlar'],['orders','🛒','Buyurtmalar'],['users','👥','Foydalanuvchilar'],['bc','📣','Xabar'],['paid','💎','Pullik'],['admins','🛡','Adminlar'],['world','🌌','World Control'],['bk','💾','Zaxira']];
 function admV(t){clearInterval(BCT);if(t)ADT=t;
  view(`<div class="admin-head"><div class="eyebrow">OWNER WORKSPACE · LIVE CONTROL</div><h2>Boshqaruv markazi</h2><p>Botning barcha muhim bo‘limlari shu yerda. Foydalanuvchilar, balanslar, vazifalar, xizmatlar, buyurtmalar va ko‘rinadigan matnlarni boshqaring.</p><div class="admin-actions"><button class="btn tq" onclick="admV('dash')">▦ Umumiy ko‘rsatkichlar</button><button class="btn" onclick="admV('set')">⚙ Barcha sozlamalar</button></div></div><div class="atabs">${AT.map(([k,i,l])=>`<button class="at ${k===ADT?'on':''}" onclick="admV('${k}')">${i} ${l}</button>`).join('')}</div><div id="ac"><div class="spn"></div></div>`);
  admT(ADT).catch(e=>toast(e.message))}
 async function admT(t){ADT=t;const c=$('#ac');if(!c)return;
+ if(t==='growth'){const d=await api('/api/adm/growth');c.innerHTML=`<div class="admin-tip">Faqat haqiqiy auditoriya: bot a’zolikni Telegram’dan tekshiradi, rejalashtirilgan postlarni kanalga o‘zi joylaydi. Soxta ko‘rish/obunachi sotilmaydi.</div><div class="sg"><div class="card"><small>Kanallar</small><div class="n">${d.channels.length}</div></div><div class="card"><small>Rejadagi postlar</small><div class="n">${d.queued}</div></div><div class="card"><small>Reklama buyurtmalari</small><div class="n">${d.ad_orders}</div></div></div><h3>🔗 Reklama kampaniyalari</h3><div class="card"><input id="gcamp_title" class="inp" placeholder="Kampaniya nomi"><button class="btn gold wide" onclick="growthCampaign()">Kampaniya havolasini yaratish</button></div>`+d.campaigns.map(cp=>`<div class="card"><b>${esc(cp.title)}</b><small>${cp.joins} ta yangi start</small><div style="word-break:break-all"><code>https://t.me/${esc(CFG.bot)}?start=camp_${cp.id}</code></div><button class="btn" onclick="navigator.clipboard.writeText('https://t.me/${esc(CFG.bot)}?start=camp_${cp.id}').then(()=>toast('Havola nusxalandi')).catch(()=>toast('Havolani qo‘lda nusxalang'))">Havolani nusxalash</button></div>`).join('')+`<h3>➕ Kanal ulash</h3><div class="card"><input id="gc_id" class="inp" placeholder="@kanal yoki -100... chat ID"><label><input type="checkbox" id="gc_req"> Referral mukofoti uchun obuna shart</label><button class="btn gold wide" onclick="growthAddChannel()">Kanalni tekshirish va ulash</button></div><h3>📡 Ulangan kanallar</h3>`+d.channels.map(ch=>`<div class="card"><b>${esc(ch.title||ch.chat_id)}</b><small>${esc(ch.username||ch.chat_id)} · ${ch.members===null?'statistika olinmadi':N(ch.members)+' obunachi'} · ${ch.require_sub?'Obuna shart':'Obuna shart emas'}</small><button class="btn red" onclick="growthDelChannel('${encodeURIComponent(ch.chat_id)}')">Uzish</button></div>`).join('')+`<h3>🗓 Post rejalashtirish</h3><div class="card"><select id="gp_chat" class="inp">${d.channels.map(ch=>`<option value="${esc(ch.chat_id)}">${esc(ch.title||ch.chat_id)}</option>`).join('')}</select><textarea id="gp_body" class="inp" rows="5" placeholder="Post matni (HTML qo‘llanadi)"></textarea><input id="gp_photo" class="inp" placeholder="Telegram file_id (ixtiyoriy)"><input id="gp_time" class="inp" type="datetime-local"><button class="btn gold wide" onclick="growthSchedule()">Postni rejalashtirish</button></div><h3>📨 Postlar tarixi</h3>`+d.posts.map(p=>`<div class="card"><b>#${p.id} · ${esc(p.status)}</b><small>${esc(p.chat_id)} · ${new Date(p.publish_at*1000).toLocaleString()}</small><p>${esc(p.body.slice(0,240))}</p>${p.error?`<small class="err">${esc(p.error)}</small>`:''}</div>`).join('')+`<h3>💎 Reklama paketlari (Telegram Stars)</h3><div class="card"><input id="go_title" class="inp" placeholder="Paket nomi"><input id="go_descr" class="inp" placeholder="Tavsif"><input id="go_stars" class="inp" type="number" min="1" placeholder="Narx (Stars)"><button class="btn gold wide" onclick="growthOfferSave()">PAKET QO‘SHISH</button></div>`+d.offers.map(o=>`<div class="card row"><div class="gr"><b>${esc(o.title)}</b><small>${o.stars} ⭐ · ${esc(o.descr)}</small></div><button class="btn" onclick="growthOfferEdit(${o.id},'${esc(o.title)}','${esc(o.descr)}',${o.stars},${o.active})">✏️</button></div>`).join('')+`<h3>💳 Reklama buyurtmalari (Telegram Stars)</h3>`+d.orders.map(o=>`<div class="card"><b>#${o.id} · ${esc(o.title||'Reklama')}</b><small>${o.stars} ⭐ · ${esc(o.status)} · user ${o.user_id}</small>${o.content?`<p style="white-space:pre-wrap">${esc(o.content)}</p>`:''}${o.status==='content_received'?`<select class="inp" id="adch_${o.id}">${d.channels.map(ch=>`<option value="${esc(ch.chat_id)}">${esc(ch.title||ch.chat_id)}</option>`).join('')}</select><button class="btn gold wide" onclick="growthPublishAd(${o.id})">KANALGA JOYLASH</button>`:''}</div>`).join('');return}
  if(t==='dash'){const d=await api('/api/adm/dash'),mx=Math.max(1,...d.ser.map(s=>s[1]));
   c.innerHTML=`<div class="sg">${[['👥','Foydalanuvchi',N(d.users)],['🆕','Bugun yangi',N(d.today)],['🔥','24 soatda aktiv',N(d.active)],['🛒','Kutilayotgan buyurtma',N(d.op)],['💰','Jami balans',K(d.bal)],['⛏','Jami topilgan',K(d.earned)],['🎯','Faol vazifa',d.tasks],['🏆','Faol auksion',d.auctions]].map(([i,l,v])=>`<div class="card"><small>${i} ${l}</small><div class="n">${v}</div></div>`).join('')}</div>
   <div class="card"><b>So‘nggi 7 kun — yangi foydalanuvchilar</b><div class="bars">${d.ser.map(s=>`<div><span>${s[1]}</span><i style="height:${Math.max(4,s[1]/mx*80)}px"></i><span>${s[0]}</span></div>`).join('')}</div></div>
@@ -2002,6 +2099,14 @@ async function admT(t){ADT=t;const c=$('#ac');if(!c)return;
  else if(t==='bk'){c.innerHTML=`<div class="card"><b>💾 Baza zaxirasi</b><p><small>Render bepul rejimida disk o‘chib ketishi mumkin. Zaxirani Telegramga yuboring va vaqti-vaqti bilan saqlab turing.</small></p><button class="btn tq wide" onclick="bkGo()">Bazani menga yuborish</button></div><div class="card"><b>♻️ Tiklash</b><p><small>Zaxira faylini (.db) botga <code>/restore</code> izohi bilan yuboring.</small></p></div><div class="card"><b>🖼 Rasm yuklash</b><p><small>Botga oddiy rasm yuboring — u sizga havola beradi. Uni auksion yoki xabarga qo‘ying.</small></p></div><div class="card"><b>🛠 Texnik ishlar</b><p><small>Sozlamalar → «Texnik ishlar rejimi»ni yoqing — foydalanuvchilar uchun ilova vaqtincha yopiladi.</small></p></div>`}
  else if(t==='svcs'){await admLoad('plats');await admLoad('svcs');c.innerHTML=`<h3>Platformalar</h3><button class="addb" onclick="admForm('plats',null)">＋ Platforma qo‘shish</button><div id="l_plats">${admRows('plats')}</div><h3>Xizmatlar</h3><button class="addb" onclick="admForm('svcs',null)">＋ Xizmat qo‘shish</button><div id="l_svcs">${admRows('svcs')}</div>`}
  else{await admLoad(t);c.innerHTML=`<button class="addb" onclick="admForm('${t}',null)">＋ ${ADM[t].add}</button>`+admRows(t)}}
+async function growthOfferSave(){try{await api('/api/adm/growth/offer',{title:$('#go_title').value,descr:$('#go_descr').value,stars:+$('#go_stars').value,active:1});toast('Paket saqlandi');admV('growth')}catch(e){toast(e.message)}}
+function growthOfferEdit(id,title,descr,stars,active){sheet(`<h3>Paketni tahrirlash</h3><input id="oe_title" class="inp" value="${esc(title)}"><input id="oe_descr" class="inp" value="${esc(descr)}"><input id="oe_stars" class="inp" type="number" value="${stars}"><button class="btn gold wide" onclick="growthOfferUpdate(${id})">SAQLASH</button>`) }
+async function growthOfferUpdate(id){try{await api('/api/adm/growth/offer',{id,title:$('#oe_title').value,descr:$('#oe_descr').value,stars:+$('#oe_stars').value,active:1});closeSheet();admV('growth')}catch(e){toast(e.message)}}
+async function growthPublishAd(id){try{await api('/api/adm/growth/ad-order/'+id,{chat_id:$('#adch_'+id).value});toast('Reklama kanalga joylandi');admV('growth')}catch(e){toast(e.message)}}
+async function growthCampaign(){try{const r=await api('/api/adm/growth/campaign',{title:$('#gcamp_title').value});toast('Kampaniya yaratildi');await navigator.clipboard.writeText(r.link).catch(()=>{});admV('growth')}catch(e){toast(e.message)}}
+async function growthAddChannel(){try{await api('/api/adm/growth/channel',{chat_id:$('#gc_id').value,require_sub:$('#gc_req').checked?1:0});toast('Kanal tekshirildi va ulandi');admV('growth')}catch(e){toast(e.message)}}
+async function growthDelChannel(id){ask('Kanalni uzasizmi?',async()=>{try{await api('/api/adm/growth/channel/delete',{chat_id:decodeURIComponent(id)});admV('growth')}catch(e){toast(e.message)}})}
+async function growthSchedule(){try{const v=$('#gp_time').value;if(!v)throw Error('Vaqtni tanlang');await api('/api/adm/growth/post',{chat_id:$('#gp_chat').value,body:$('#gp_body').value,photo:$('#gp_photo').value,publish_at:new Date(v).getTime()/1000});toast('Post navbatga qo‘shildi');admV('growth')}catch(e){toast(e.message)}}
 async function admWorldToggle(table,id,active){try{await api('/api/adm/world',{op:'toggle',table,id,active});admV('world')}catch(e){toast(e.message)}}
 
 async function admWorldSave(op){try{let b={op};if(op==='quest')Object.assign(b,{title:$('#wq_title').value,descr:$('#wq_descr').value,icon:$('#wq_icon').value,kind:$('#wq_kind').value,goal:+$('#wq_goal').value,reward:+$('#wq_reward').value,period:$('#wq_period').value});if(op==='item')Object.assign(b,{slug:$('#wi_slug').value,title:$('#wi_title').value,icon:$('#wi_icon').value,price:+$('#wi_price').value,rarity:$('#wi_rarity').value,descr:$('#wi_descr').value});if(op==='event')Object.assign(b,{title:$('#we_title').value,icon:$('#we_icon').value,reward:+$('#we_reward').value,descr:$('#we_descr').value});if(op==='tournament')Object.assign(b,{title:$('#wt_title').value,reward:+$('#wt_reward').value,descr:$('#wt_descr').value});await api('/api/adm/world',b);toast('Saqlandi');admV('world')}catch(e){toast(e.message)}}
@@ -2046,8 +2151,186 @@ function bcPoll(){clearInterval(BCT);const f=async()=>{const e=$('#bcs');if(!e){
 async function bkGo(){try{await api('/api/adm/backup',{});good();toast('Telegramga yuborildi 💾')}catch(e){toast(e.message)}}
 
 (async()=>{try{await refresh()}catch(e){if(e.message==='maint'){navR();return maintV()}document.body.innerHTML='<p style="padding:40px;text-align:center">Ilovani Telegram ichida oching.</p>';return}
- go('tap');if(/[?&]admin=1/.test(location.search)&&CFG.is_admin){tab='profile';navR();admV('dash')}})();
+ go('tap');if(/[?&]admin=1/.test(location.search)&&CFG.is_admin){tab='profile';navR();admV(/[?&]growth=1/.test(location.search)?'growth':'dash')}})();
 </script></body></html>"""
+
+
+# ───────────────────────── REAL GROWTH ENGINE ─────────────────────────
+def process_growth_queue():
+    """Publish due posts once; failed sends remain visible for owner retry."""
+    now=time.time()
+    due=q("select * from growth_posts where status='queued' and publish_at<=? order by publish_at,id limit 10",(now,))
+    for post in due:
+        # Atomic claim prevents duplicate publishing if the worker overlaps.
+        with LK:
+            cur=DB.execute("update growth_posts set status='sending' where id=? and status='queued'",(post['id'],))
+            if cur.rowcount != 1:
+                continue
+        try:
+            if post['photo']:
+                payload=dict(chat_id=post['chat_id'],photo=post['photo'],caption=post['body'][:1024],parse_mode='HTML')
+                if post['button_text'] and post['button_url']:
+                    payload['reply_markup']={'inline_keyboard':[[{'text':post['button_text'],'url':post['button_url']}]]}
+                result=tg('sendPhoto',**payload)
+            else:
+                payload=dict(chat_id=post['chat_id'],text=post['body'][:4096],parse_mode='HTML',disable_web_page_preview=False)
+                if post['button_text'] and post['button_url']:
+                    payload['reply_markup']={'inline_keyboard':[[{'text':post['button_text'],'url':post['button_url']}]]}
+                result=tg('sendMessage',**payload)
+            if result:
+                x("update growth_posts set status='sent',sent_at=?,error='' where id=?",(now,post['id']))
+                x("insert into growth_snapshots(chat_id,day,members,sampled) select chat_id,?,0,? from growth_channels where chat_id=? on conflict(chat_id,day) do nothing",(today(),now,post['chat_id']))
+            else:
+                x("update growth_posts set status='failed',error='Telegram API xabarni yubormadi' where id=?",(post['id'],))
+        except Exception as e:
+            x("update growth_posts set status='failed',error=? where id=?",(str(e)[:300],post['id']))
+
+
+def sample_growth_channels():
+    now=time.time(); day=today()
+    for chn in q("select * from growth_channels where active=1"):
+        result=tg('getChatMemberCount',chat_id=chn['chat_id'])
+        if isinstance(result,int):
+            x("insert into growth_snapshots(chat_id,day,members,sampled) values(?,?,?,?) on conflict(chat_id,day) do update set members=excluded.members,sampled=excluded.sampled",(chn['chat_id'],day,result,now))
+
+
+@app.get('/api/adm/growth')
+@adm
+def api_adm_growth():
+    channels=[]
+    for c in q("select * from growth_channels where active=1 order by added desc"):
+        n=tg('getChatMemberCount',chat_id=c['chat_id'])
+        channels.append(dict(c, members=n if isinstance(n,int) else None))
+    posts=[dict(r) for r in q("select * from growth_posts order by id desc limit 40")]
+    orders=[dict(r) for r in q("select o.*,f.title from growth_ad_orders o left join growth_ad_offers f on f.id=o.offer_id order by o.id desc limit 40")]
+    offers=[dict(r) for r in q("select * from growth_ad_offers order by stars,id")]
+    return jsonify(channels=channels,posts=posts,orders=orders,offers=offers,
+        queued=one("select count(*) from growth_posts where status='queued'"),
+        ad_orders=one("select count(*) from growth_ad_orders where status in ('paid_review','approved')"),
+        campaigns=[dict(r) for r in q("select c.*,(select count(*) from growth_campaign_events e where e.campaign_id=c.id) joins from growth_campaigns c order by c.id desc limit 30")])
+
+
+@app.post('/api/adm/growth/channel')
+@adm
+def api_adm_growth_channel():
+    b=request.json or {}; chat=str(b.get('chat_id','')).strip()
+    if not chat or len(chat)>120: raise Err('Kanal @username yoki chat ID sini kiriting')
+    chatinfo=tg('getChat',chat_id=chat)
+    if not chatinfo: raise Err('Kanal topilmadi. Bot kanalga qo‘shilganini tekshiring.')
+    me=tg('getMe') or {}; botid=me.get('id')
+    member=tg('getChatMember',chat_id=chat,user_id=botid) if botid else None
+    if not member or member.get('status') not in ('administrator','creator') or (member.get('status')=='administrator' and member.get('can_post_messages') is False):
+        raise Err('Botni kanalga post joylash huquqi bor ADMIN qiling. Obunani tekshirish va post joylash uchun shu ruxsat zarur.')
+    cid=str(chatinfo.get('id',chat)); username='@'+chatinfo['username'] if chatinfo.get('username') else ''
+    invite=''
+    if not username:
+        ir=tg('createChatInviteLink',chat_id=cid,name='AKCOIN referral')
+        invite=(ir or {}).get('invite_link','')
+        if b.get('require_sub') and not invite:
+            raise Err('Yopiq kanal uchun taklif havolasini yaratib bo‘lmadi. Botga invite users ruxsatini bering yoki ochiq kanal ulang.')
+    x("insert into growth_channels(chat_id,username,title,invite_url,require_sub,active,added) values(?,?,?,?,?,1,?) on conflict(chat_id) do update set username=excluded.username,title=excluded.title,invite_url=excluded.invite_url,require_sub=excluded.require_sub,active=1",(cid,username,chatinfo.get('title') or chatinfo.get('first_name') or cid,invite,1 if b.get('require_sub') else 0,time.time()))
+    return jsonify(ok=True,title=chatinfo.get('title'),chat_id=cid)
+
+
+@app.post('/api/adm/growth/channel/delete')
+@adm
+def api_adm_growth_channel_delete():
+    cid=str((request.json or {}).get('chat_id',''))
+    if not cid: raise Err('Kanal tanlanmadi')
+    x("update growth_channels set active=0 where chat_id=?",(cid,))
+    return jsonify(ok=True)
+
+
+@app.post('/api/adm/growth/post')
+@adm
+def api_adm_growth_post():
+    b=request.json or {}; cid=str(b.get('chat_id','')).strip(); body=str(b.get('body','')).strip()
+    try: when=float(b.get('publish_at',0))
+    except Exception: when=0
+    chn=q("select * from growth_channels where chat_id=? and active=1",(cid,),True)
+    if not chn: raise Err('Avval kanalni ulang')
+    if len(body)<2 or len(body)>4096: raise Err('Post matni 2–4096 belgi bo‘lsin')
+    if when<time.time()-60 or when>time.time()+90*86400: raise Err('Post vaqti hozirdan 90 kun ichida bo‘lishi kerak')
+    photo=str(b.get('photo','')).strip()[:500]
+    pid=x("insert into growth_posts(chat_id,body,photo,publish_at,status,created) values(?,?,?,?,'queued',?)",(cid,body,photo,when,time.time()))
+    return jsonify(ok=True,id=pid)
+
+
+@app.post('/api/adm/growth/post/<int:pid>/retry')
+@adm
+def api_adm_growth_post_retry(pid):
+    x("update growth_posts set status='queued',publish_at=?,error='' where id=? and status='failed'",(time.time(),pid))
+    return jsonify(ok=True)
+
+
+@app.post('/api/adm/growth/campaign')
+@adm
+def api_adm_growth_campaign():
+    b=request.json or {}; title=str(b.get('title','')).strip()[:80]
+    if len(title)<3: raise Err('Kampaniya nomi kamida 3 belgi bo‘lsin')
+    code=hashlib.sha256(f"{title}:{time.time_ns()}".encode()).hexdigest()[:10]
+    cid=x("insert into growth_campaigns(title,code,active,created) values(?,?,1,?)",(title,code,time.time()))
+    return jsonify(id=cid,link=f"https://t.me/{BOT_USER}?start=camp_{cid}")
+
+
+@app.post('/api/adm/growth/offer')
+@adm
+def api_adm_growth_offer():
+    b=request.json or {}; title=str(b.get('title','')).strip()[:32]; descr=str(b.get('descr','')).strip()[:255]
+    stars=int(b.get('stars',0)); active=1 if b.get('active',1) else 0
+    if len(title)<3 or stars<1 or stars>100000: raise Err('Paket nomi va Telegram Stars narxini tekshiring')
+    if b.get('id'):
+        x("update growth_ad_offers set title=?,descr=?,stars=?,active=? where id=?",(title,descr,stars,active,int(b['id'])))
+    else:
+        x("insert into growth_ad_offers(title,descr,stars,active,created) values(?,?,?,?,?)",(title,descr,stars,active,time.time()))
+    return jsonify(ok=True)
+
+
+@app.post('/api/adm/growth/ad-order/<int:oid>')
+@adm
+def api_adm_growth_ad_publish(oid):
+    b=request.json or {}; cid=str(b.get('chat_id','')).strip()
+    od=q("select * from growth_ad_orders where id=?",(oid,),True)
+    if not od or od['status']!='content_received': raise Err('To‘langan va matni kelgan reklama buyurtmasi topilmadi')
+    if not q("select 1 from growth_channels where chat_id=? and active=1",(cid,),True): raise Err('Avval kanalni Growth Center orqali ulang')
+    # Paid user content is posted as plain text, never interpreted as HTML.
+    result=tg('sendMessage',chat_id=cid,text=od['content'][:3500],disable_web_page_preview=False)
+    if not result: raise Err('Telegram postni joylay olmadi. Bot admin huquqini tekshiring.')
+    x("update growth_ad_orders set status='published',published=? where id=? and status='content_received'",(time.time(),oid))
+    send(od['user_id'],f"✅ Reklama buyurtmangiz #{oid} kanalga joylandi: {cid}")
+    return jsonify(ok=True)
+
+
+@app.post('/api/growth/verify')
+@auth
+def api_growth_verify():
+    uid=g.uid
+    pending=q("select * from growth_referrals where invitee_id=? and status='pending'",(uid,),True)
+    required=q("select * from growth_channels where active=1 and require_sub=1")
+    missing=[]
+    for chn in required:
+        m=tg('getChatMember',chat_id=chn['chat_id'],user_id=uid)
+        if not m or (m.get('status') not in ('member','administrator','creator') and not (m.get('status')=='restricted' and m.get('is_member'))):
+            missing.append(chn['username'] or chn['title'])
+    if missing:
+        return jsonify(ok=False,missing=missing,message='Avval barcha shartli kanallarga obuna bo‘ling.'),400
+    if pending:
+        with LK:
+            x("update growth_referrals set status='credited',credited=? where invitee_id=? and status='pending'",(time.time(),uid))
+            changed=q("select changes()",one=True)[0]
+            if changed:
+                gain(uid,si('ref_new'))
+                gain(pending['referrer_id'],si('ref_reward'))
+                x("insert into notifications(user_id,title,body,created) values(?,?,?,?)",(pending['referrer_id'],'Taklif bonusi',f"Do‘stingiz obunani tasdiqladi: +{si('ref_reward')} {coin()}",time.time()))
+                send(pending['referrer_id'],f"🎉 Taklifingizdagi foydalanuvchi kanallarga obuna bo‘ldi. +{si('ref_reward')} {coin()} berildi!")
+    return jsonify(ok=True,credited=bool(pending),message='Obuna tasdiqlandi.')
+
+
+@app.get('/api/growth/referral')
+@auth
+def api_growth_referral():
+    req=q("select username,title,invite_url from growth_channels where active=1 and require_sub=1")
+    return jsonify(channels=[dict(r) for r in req],pending=bool(q("select 1 from growth_referrals where invitee_id=? and status='pending'",(g.uid,),True)))
 
 
 # ───────────────────────── START ─────────────────────────
