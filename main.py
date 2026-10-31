@@ -137,17 +137,55 @@ create table if not exists admins(id integer primary key,note text default '');
 create table if not exists paid(id integer primary key autoincrement,icon text default '⭐',title text,descr text default '',sort integer default 0,active integer default 1);
 create table if not exists plats(slug text primary key,title text,icon text default '✨',sort integer default 0,active integer default 1);
 create table if not exists svcs(id integer primary key autoincrement,plat text,slug text,title text,icon text default '✨',price integer,minq integer default 100,ph text default '',smm_id text default '',sort integer default 0,active integer default 1);
+
+create table if not exists game_items(id integer primary key autoincrement,slug text unique,title text,descr text default '',icon text default '✨',price integer default 0,rarity text default 'common',active integer default 1);
+create table if not exists inventory(id integer primary key autoincrement,user_id integer,item_id integer,qty integer default 1,equipped integer default 0,unique(user_id,item_id));
+create table if not exists market_listings(id integer primary key autoincrement,seller_id integer,item_id integer,price integer,qty integer default 1,status text default 'open',created real);
+create table if not exists clans(id integer primary key autoincrement,name text unique,tag text unique,owner_id integer,descr text default '',created real);
+create table if not exists clan_members(clan_id integer,user_id integer,role text default 'member',joined real,contribution integer default 0,primary key(clan_id,user_id));
+create table if not exists achievements(id integer primary key autoincrement,slug text unique,title text,descr text,icon text,reward integer,metric text,target integer,active integer default 1);
+create table if not exists user_achievements(user_id integer,achievement_id integer,claimed real,primary key(user_id,achievement_id));
+create table if not exists live_events(id integer primary key autoincrement,title text,descr text,icon text default '🎉',reward integer default 0,starts real,ends real,active integer default 1);
+create table if not exists event_claims(user_id integer,event_id integer,claimed real,primary key(user_id,event_id));
+create table if not exists season_progress(user_id integer primary key,xp integer default 0,updated real);
+create table if not exists season_claims(user_id integer,level integer,claimed real,primary key(user_id,level));
+create table if not exists season_rewards(level integer primary key,xp_need integer,reward integer,title text);
+create table if not exists tournaments(id integer primary key autoincrement,title text,descr text,starts real,ends real,active integer default 1,reward integer default 0);
+create table if not exists tournament_scores(tournament_id integer,user_id integer,score integer default 0,updated real,primary key(tournament_id,user_id));
+create table if not exists tournament_daily(tournament_id integer,user_id integer,day text,score integer default 0,primary key(tournament_id,user_id,day));
+create table if not exists support_tickets(id integer primary key autoincrement,user_id integer,subject text,message text,status text default 'open',created real,reply text default '');
+create table if not exists notifications(id integer primary key autoincrement,user_id integer,title text,body text,created real,seen integer default 0);
+create table if not exists wheel_claims(user_id integer,day text,reward integer,claimed real,primary key(user_id,day));
+create table if not exists risk_events(id integer primary key autoincrement,user_id integer,kind text,detail text,created real);
 """)
         for t, c, d in [("users", "earned", "integer default 0"), ("users", "daily_day", "text default ''"),
-                        ("users", "streak", "integer default 0"), ("tasks", "sort", "integer default 0"),
+                        ("users", "streak", "integer default 0"), ("users", "taps_total", "integer default 0"), ("tasks", "sort", "integer default 0"),
                         ("orders", "ext", "text default ''")]:
             try:
                 DB.execute(f"alter table {t} add column {c} {d}")
             except sqlite3.OperationalError:
                 pass
         DB.execute("update users set earned=balance where earned=0 or earned is null")
+        DB.execute("insert or ignore into season_progress(user_id,xp,updated) select id,coalesce(earned,0),? from users", (time.time(),))
         for k, _, d, _, _ in SETDEF:
             DB.execute("insert or ignore into settings values(?,?)", (k, d))
+        if not DB.execute("select 1 from achievements").fetchone():
+            DB.executemany("insert into achievements(slug,title,descr,icon,reward,metric,target) values(?,?,?,?,?,?,?)", [
+                ("first_tap","Birinchi qadam","Birinchi marta coin bosing","👆",100,"taps",1),
+                ("tap_100","Faol o‘yinchi","100 marta coin bosing","⚡",500,"taps",100),
+                ("earn_1000","Minglik","Jami 1 000 coin ishlang","💰",300,"earned",1000),
+                ("invite_1","Do‘st orttir","Birinchi do‘stingizni taklif qiling","🤝",500,"refs",1),
+                ("daily_7","Bir haftalik seriya","7 kunlik kunlik bonus seriyasiga erishing","🔥",1000,"streak",7),
+                ("level_gold","Oltin daraja","Oltin darajaga yeting","🏅",1500,"level",3)])
+        if not DB.execute("select 1 from game_items").fetchone():
+            DB.executemany("insert into game_items(slug,title,descr,icon,price,rarity) values(?,?,?,?,?,?)", [
+                ("neon_frame","Neon ramka","Profil uchun yorqin ramka","🟢",1200,"rare"),
+                ("cosmic_avatar","Kosmik avatar","Maxsus profil avatari","🪐",2500,"epic"),
+                ("gold_badge","Oltin nishon","Profilingizga oltin nishon","🏅",4000,"epic"),
+                ("legend_bg","Afsona foni","Profil uchun afsonaviy fon","🌌",8000,"legendary")])
+        if not DB.execute("select 1 from season_rewards").fetchone():
+            DB.executemany("insert into season_rewards(level,xp_need,reward,title) values(?,?,?,?)",
+                [(i, i*100, i*150, f"{i}-bosqich mukofoti") for i in range(1,51)])
         # Old default daily rewards were 100, 200, ...; migrate those defaults to a fixed 200/day.
         # If an admin customized either value, leave that choice untouched.
         DB.execute("update settings set v='200' where k='daily_base' and v='100'")
@@ -207,6 +245,24 @@ def is_admin(uid):
 
 
 init_db()
+with LK:
+    DB.executescript("""
+    create table if not exists world_daily(user_id integer,day text,taps integer default 0,logins integer default 0,primary key(user_id,day));
+    create table if not exists world_quests(id integer primary key autoincrement,title text,descr text default '',icon text default '🎯',kind text default 'taps',goal integer default 1,reward integer default 0,period text default 'daily',active integer default 1,sort integer default 0);
+    create table if not exists world_quest_claims(user_id integer,quest_id integer,period_key text,primary key(user_id,quest_id,period_key));
+    """)
+    if not DB.execute('select 1 from world_quests limit 1').fetchone():
+        DB.executemany('insert into world_quests(title,descr,icon,kind,goal,reward,period,sort) values(?,?,?,?,?,?,?,?)',[
+            ('Kundalik faollik','Bugun o‘yinga kiring','🌅','login',1,150,'daily',1),
+            ('100 ta bosish','Bugun 100 marta tanga bosing','👆','taps',100,300,'daily',2),
+            ('500 ta bosish','Bugun 500 marta tanga bosing','🔥','taps',500,900,'daily',3),
+            ('Haftalik do‘st','Bitta do‘st taklif qiling','🤝','refs',1,1000,'weekly',4),
+            ('Tanga yig‘uvchi','Jami 10 000 tanga ishlab toping','💰','earned',10000,1500,'once',5)])
+
+    if not DB.execute('select 1 from live_events').fetchone():
+        now=time.time(); DB.execute('insert into live_events(title,descr,icon,reward,starts,ends,active) values(?,?,?,?,?,?,1)',('AKCOIN haftaligi','Hafta davomida faol bo‘ling va maxsus bonusni oling','⚡',1200,now,now+7*86400))
+    if not DB.execute('select 1 from tournaments').fetchone():
+        now=time.time(); DB.execute('insert into tournaments(title,descr,starts,ends,active,reward) values(?,?,?,?,1,?)',('NEON TAP CUP','Energiya bilan haqiqiy o‘yin bosishlari orqali ochko yig‘ing. Kunlik limit: 500 ochko. TOP-3 sovrin oladi.',now,now+7*86400,5000))
 
 # ───────────────────────── TELEGRAM ─────────────────────────
 BOT_USER = ""
@@ -249,6 +305,8 @@ def ucost(k, l):
 
 def gain(uid, amt):
     x("update users set balance=balance+?,earned=earned+? where id=?", (amt, max(amt, 0), uid))
+    if amt > 0:
+        x("insert into season_progress(user_id,xp,updated) values(?,?,?) on conflict(user_id) do update set xp=xp+excluded.xp,updated=excluded.updated", (uid, amt, time.time()))
 
 
 def lvl_info(e):
@@ -454,6 +512,9 @@ def services():
 @auth
 def api_me():
     d = state(get(g.uid))
+    eq=q("select g.icon,g.title,g.rarity from inventory i join game_items g on g.id=i.item_id where i.user_id=? and i.equipped=1",(g.uid,),True)
+    d["equipped"] = dict(eq) if eq else None
+    d["inventory_count"] = one("select count(*) from inventory where user_id=?",(g.uid,))
     d["cfg"] = dict(coin=coin(), ch=ch(), bot=BOT_USER, admin=sv("admin_username").lstrip("@"), ads=sv("adsgram"),
                     ref=si("ref_reward"), refnew=si("ref_new"), announce=sv("announce"), is_admin=g.adm,
                     paid=[[p["icon"], p["title"], p["descr"]] for p in q("select * from paid where active=1 order by sort,id")])
@@ -472,7 +533,17 @@ def api_tap():
         n = max(0, min(n, 80))
         n = min(n, int(max(0, now - (u["energy_ts"] or now)) * 25) + 40, int(e // p))
         gn = n * p
-        x("update users set balance=balance+?,earned=earned+?,energy=?,energy_ts=? where id=?", (gn, gn, e - gn, now, g.uid))
+        x("update users set balance=balance+?,earned=earned+?,energy=?,energy_ts=?,taps_total=coalesce(taps_total,0)+? where id=?", (gn, gn, e - gn, now, n, g.uid))
+        x("insert into season_progress(user_id,xp,updated) values(?,?,?) on conflict(user_id) do update set xp=xp+excluded.xp,updated=excluded.updated", (g.uid, gn, now))
+        x("insert into world_daily(user_id,day,taps,logins) values(?,?,?,1) on conflict(user_id,day) do update set taps=taps+excluded.taps", (g.uid,today(),n))
+        if n:
+            x("update clan_members set contribution=contribution+? where user_id=?",(n,g.uid))
+            for tr in q("select id from tournaments where active=1 and starts<=? and ends>?",(now,now)):
+                dr=q("select score from tournament_daily where tournament_id=? and user_id=? and day=?",(tr['id'],g.uid,today()),True)
+                pts=min(n,max(0,500-(dr['score'] if dr else 0)))
+                if pts:
+                    x("insert into tournament_daily(tournament_id,user_id,day,score) values(?,?,?,?) on conflict(tournament_id,user_id,day) do update set score=score+excluded.score",(tr['id'],g.uid,today(),pts))
+                    x("insert into tournament_scores(tournament_id,user_id,score,updated) values(?,?,?,?) on conflict(tournament_id,user_id) do update set score=score+excluded.score,updated=excluded.updated",(tr['id'],g.uid,pts,now))
         return jsonify(state(get(g.uid)))
 
 
@@ -506,6 +577,7 @@ def api_daily():
         rw = di["rewards"][di["done"]]
         gain(g.uid, rw)
         x("update users set daily_day=?,streak=? where id=?", (today(), di["streak"] + 1, g.uid))
+        x("insert into notifications(user_id,title,body,created) values(?,?,?,?)", (g.uid, "Kunlik bonus", f"+{rw} {coin()} hisobingizga qo‘shildi", time.time()))
     return jsonify(reward=rw, state=state(get(g.uid)))
 
 
@@ -1111,6 +1183,255 @@ def keepalive():
 
 
 # ───────────────────────── MINI APP ─────────────────────────
+
+
+# ─────────────────────── AKCOIN WORLD / SOCIAL / LIVE SYSTEMS ───────────────────────
+def _vip(earned):
+    tiers = [(0,"STARTER","▫️"),(10000,"BRONZE","🥉"),(50000,"SILVER","🥈"),(200000,"GOLD","🥇"),(1000000,"DIAMOND","💎"),(5000000,"LEGEND","👑")]
+    cur = tiers[0]
+    nxt = None
+    for t in tiers:
+        if earned >= t[0]: cur = t
+        elif nxt is None: nxt = t
+    return {"name":cur[1],"icon":cur[2],"next":nxt[0] if nxt else None,"progress":min(100, int(earned/ nxt[0]*100)) if nxt else 100}
+
+def _achievement_progress(u, metric):
+    vals = {"taps":int(u["taps_total"] or 0),"earned":int(u["earned"] or 0),"refs":int(u["refs"] or 0),
+            "streak":int(u["streak"] or 0),"level":int(lvl_info(u["earned"])["i"])}
+    return vals.get(metric, 0)
+
+@app.get("/api/world")
+@auth
+def api_world():
+    uid=g.uid; u=get(uid); now=time.time()
+    items=q("select * from game_items where active=1 order by price,id")
+    inv=q("select i.*,g.slug,g.title,g.icon,g.rarity,g.descr from inventory i join game_items g on g.id=i.item_id where i.user_id=? order by i.id desc",(uid,))
+    ach=[]
+    for a in q("select * from achievements where active=1 order by id"):
+        done=q("select 1 from user_achievements where user_id=? and achievement_id=?",(uid,a["id"]),True)
+        prog=_achievement_progress(u,a["metric"])
+        ach.append(dict(id=a["id"],title=a["title"],descr=a["descr"],icon=a["icon"],reward=a["reward"],target=a["target"],progress=min(prog,a["target"]),claimed=bool(done)))
+    events=[]
+    for e in q("select * from live_events where active=1 and starts<=? and ends>? order by ends",(now,now)):
+        cl=q("select 1 from event_claims where user_id=? and event_id=?",(uid,e["id"]),True)
+        events.append(dict(id=e["id"],title=e["title"],descr=e["descr"],icon=e["icon"],reward=e["reward"],ends=e["ends"],claimed=bool(cl)))
+    cl=q("select c.*,count(m.user_id) members,coalesce(sum(m.contribution),0) contribution from clans c left join clan_members m on m.clan_id=c.id group by c.id order by contribution desc,members desc limit 20")
+    mine=q("select c.id,c.name,c.tag,c.descr,m.role,m.contribution from clan_members m join clans c on c.id=m.clan_id where m.user_id=?",(uid,),True)
+    listings=q("select l.id,l.price,l.qty,g.title,g.icon,g.rarity,u.name seller from market_listings l join game_items g on g.id=l.item_id join users u on u.id=l.seller_id where l.status='open' and l.seller_id!=? order by l.created desc limit 30",(uid,))
+    sp=q("select xp from season_progress where user_id=?",(uid,),True)
+    xp=sp["xp"] if sp else 0; season_level=min(50,xp//100)
+    rewards=q("select r.*,case when c.level is null then 0 else 1 end claimed from season_rewards r left join season_claims c on c.user_id=? and c.level=r.level where r.level<=? order by r.level",(uid,season_level))
+    tour=q("select * from tournaments where active=1 and starts<=? and ends>? order by ends limit 5",(now,now))
+    tours=[]
+    for t in tour:
+        rank=q("select count(*)+1 n from tournament_scores where tournament_id=? and score>(select coalesce(score,0) from tournament_scores where tournament_id=? and user_id=?)",(t["id"],t["id"],uid),True)
+        mine_score=q("select score from tournament_scores where tournament_id=? and user_id=?",(t["id"],uid),True)
+        tours.append(dict(id=t["id"],title=t["title"],descr=t["descr"],ends=t["ends"],reward=t["reward"],score=mine_score["score"] if mine_score else 0,rank=rank["n"] if rank else 1))
+    wheel_done=q("select 1 from wheel_claims where user_id=? and day=?",(uid,today()),True)
+    notices=q("select id,title,body,created,seen from notifications where user_id=? order by id desc limit 20",(uid,))
+    support=q("select id,subject,status,created,reply from support_tickets where user_id=? order by id desc limit 10",(uid,))
+    referrals=q("select id,name,created from users where ref_by=? order by created desc limit 20",(uid,))
+    wd=q("select taps from world_daily where user_id=? and day=?",(uid,today()),True); daily_taps=wd['taps'] if wd else 0
+    week=datetime.now(timezone.utc).strftime('%G-%V'); quests=[]
+    for z in q("select * from world_quests where active=1 order by sort,id"):
+        if z['kind']=='taps': progress=daily_taps
+        elif z['kind']=='login': progress=1
+        elif z['kind']=='refs' and z['period']=='weekly':
+            monday=(datetime.now(timezone.utc)-timedelta(days=datetime.now(timezone.utc).weekday())).strftime('%Y-%m-%d')
+            progress=one('select count(*) from users where ref_by=? and date(created,\'unixepoch\')>=?',(uid,monday))
+        elif z['kind']=='refs': progress=u['refs']
+        elif z['kind']=='earned': progress=u['earned']
+        else: progress=u['balance']
+        pkey=today() if z['period']=='daily' else ('week:'+week if z['period']=='weekly' else 'once')
+        claimed=bool(q("select 1 from world_quest_claims where user_id=? and quest_id=? and period_key=?",(uid,z['id'],pkey),True))
+        quests.append(dict(id=z['id'],title=z['title'],descr=z['descr'],icon=z['icon'],progress=min(int(progress),z['goal']),goal=z['goal'],reward=z['reward'],period=z['period'],claimed=claimed,ready=progress>=z['goal'] and not claimed))
+    return jsonify(referrals=[dict(r) for r in referrals],quests=quests,items=[dict(i) for i in items],inventory=[dict(i) for i in inv],achievements=ach,events=events,clans=[dict(c) for c in cl],my_clan=dict(mine) if mine else None,
+        listings=[dict(l) for l in listings],season={"xp":xp,"level":season_level,"next":(season_level+1)*100 if season_level<50 else 5000,"rewards":[dict(r) for r in rewards]},
+        tournaments=tours,vip=_vip(u["earned"]),wheel_available=not bool(wheel_done),notifications=[dict(n) for n in notices],support=[dict(t) for t in support])
+
+@app.post("/api/world/action")
+@auth
+def api_world_action():
+    b=request.json or {}; op=str(b.get("op","")); uid=g.uid; now=time.time()
+    with LK:
+        u=get(uid)
+        if op=="quest_claim":
+            qid=int(b.get("id",0)); z=q("select * from world_quests where id=? and active=1",(qid,),True)
+            if not z: raise Err("Missiya topilmadi")
+            wd=q("select taps from world_daily where user_id=? and day=?",(uid,today()),True)
+            if z["kind"]=="taps": progress=wd["taps"] if wd else 0
+            elif z["kind"]=="login": progress=1
+            elif z["kind"]=="refs" and z["period"]=="weekly":
+                monday=(datetime.now(timezone.utc)-timedelta(days=datetime.now(timezone.utc).weekday())).strftime("%Y-%m-%d")
+                progress=one("select count(*) from users where ref_by=? and date(created,'unixepoch')>=?",(uid,monday))
+            elif z["kind"]=="refs": progress=u["refs"]
+            elif z["kind"]=="earned": progress=u["earned"]
+            else: progress=u["balance"]
+            pkey=today() if z["period"]=="daily" else ("week:"+datetime.now(timezone.utc).strftime("%G-%V") if z["period"]=="weekly" else "once")
+            if progress<z["goal"]: raise Err("Missiya hali bajarilmagan")
+            if q("select 1 from world_quest_claims where user_id=? and quest_id=? and period_key=?",(uid,qid,pkey),True): raise Err("Mukofot avval olingan")
+            x("insert into world_quest_claims(user_id,quest_id,period_key) values(?,?,?)",(uid,qid,pkey)); gain(uid,z["reward"])
+        elif op=="item_buy":
+            item=q("select * from game_items where id=? and active=1",(int(b.get("id",0)),),True)
+            if not item: raise Err("Buyum topilmadi")
+            if u["balance"]<item["price"]: raise Err("Coin yetarli emas")
+            x("update users set balance=balance-? where id=?",(item["price"],uid))
+            x("insert into inventory(user_id,item_id,qty) values(?,?,1) on conflict(user_id,item_id) do update set qty=qty+1",(uid,item["id"]))
+            x("insert into notifications(user_id,title,body,created) values(?,?,?,?)",(uid,"Yangi buyum",item["title"]+" omboringizga qo‘shildi",now))
+        elif op=="item_equip":
+            item=q("select * from inventory where user_id=? and item_id=?",(uid,int(b.get("id",0))),True)
+            if not item: raise Err("Bu buyum sizda yo‘q")
+            x("update inventory set equipped=0 where user_id=?",(uid,))
+            x("update inventory set equipped=1 where user_id=? and item_id=?",(uid,item["item_id"]))
+        elif op=="achievement_claim":
+            a=q("select * from achievements where id=? and active=1",(int(b.get("id",0)),),True)
+            if not a: raise Err("Yutuq topilmadi")
+            if q("select 1 from user_achievements where user_id=? and achievement_id=?",(uid,a["id"]),True): raise Err("Mukofot avval olingan")
+            if _achievement_progress(u,a["metric"])<a["target"]: raise Err("Yutuq hali bajarilmagan")
+            x("insert into user_achievements(user_id,achievement_id,claimed) values(?,?,?)",(uid,a["id"],now)); gain(uid,a["reward"])
+        elif op=="event_claim":
+            e=q("select * from live_events where id=? and active=1 and starts<=? and ends>?",(int(b.get("id",0)),now,now),True)
+            if not e: raise Err("Tadbir faol emas")
+            if q("select 1 from event_claims where user_id=? and event_id=?",(uid,e["id"]),True): raise Err("Mukofot avval olingan")
+            x("insert into event_claims(user_id,event_id,claimed) values(?,?,?)",(uid,e["id"],now)); gain(uid,e["reward"])
+        elif op=="season_claim":
+            lv=int(b.get("level",0)); r=q("select * from season_rewards where level=?",(lv,),True)
+            sp=q("select xp from season_progress where user_id=?",(uid,),True); xp=sp["xp"] if sp else 0
+            if not r or xp<r["xp_need"]: raise Err("Season bosqichi ochilmagan")
+            if q("select 1 from season_claims where user_id=? and level=?",(uid,lv),True): raise Err("Mukofot avval olingan")
+            x("insert into season_claims(user_id,level,claimed) values(?,?,?)",(uid,lv,now)); gain(uid,r["reward"])
+        elif op=="clan_create":
+            name=str(b.get("name","")).strip()[:32]; tag=re.sub(r"[^A-Za-z0-9]","",str(b.get("tag","")).upper())[:6]
+            descr=str(b.get("descr","")).strip()[:160]
+            if len(name)<3 or len(tag)<2: raise Err("Jamoa nomi kamida 3, teg 2 belgidan iborat bo‘lsin")
+            if q("select 1 from clan_members where user_id=?",(uid,),True): raise Err("Avvalgi jamoangizdan chiqing")
+            if u["balance"]<1000: raise Err("Jamoa ochish uchun 1 000 coin kerak")
+            try:
+                cid=x("insert into clans(name,tag,owner_id,descr,created) values(?,?,?,?,?)",(name,tag,uid,descr,now))
+            except sqlite3.IntegrityError:
+                raise Err("Bu jamoa nomi yoki TAG band")
+            x("update users set balance=balance-1000 where id=?",(uid,))
+            x("insert into clan_members(clan_id,user_id,role,joined) values(?,?,'owner',?)",(cid,uid,now))
+        elif op=="clan_join":
+            cid=int(b.get("id",0))
+            if q("select 1 from clan_members where user_id=?",(uid,),True): raise Err("Avvalgi jamoangizdan chiqing")
+            if not q("select 1 from clans where id=?",(cid,),True): raise Err("Jamoa topilmadi")
+            if one("select count(*) from clan_members where clan_id=?",(cid,))>=30: raise Err("Jamoa to‘la (30/30)")
+            x("insert into clan_members(clan_id,user_id,role,joined) values(?,?,'member',?)",(cid,uid,now))
+        elif op=="clan_leave":
+            row=q("select * from clan_members where user_id=?",(uid,),True)
+            if not row: raise Err("Siz jamoada emassiz")
+            if row["role"]=="owner":
+                members=q("select user_id from clan_members where clan_id=? and user_id!=? order by joined limit 1",(row["clan_id"],uid))
+                if members: x("update clan_members set role='owner' where clan_id=? and user_id=?",(row["clan_id"],members[0]["user_id"]))
+                else: x("delete from clans where id=?",(row["clan_id"],))
+            x("delete from clan_members where user_id=?",(uid,))
+        elif op=="market_sell":
+            iid=int(b.get("id",0)); price=max(1,min(100000000,int(b.get("price",0))))
+            it=q("select * from inventory where user_id=? and item_id=? and qty>0",(uid,iid),True)
+            if not it: raise Err("Sotish uchun buyum yo‘q")
+            if it["equipped"]: raise Err("Avval profil studiyasida buyumni yeching")
+            if one("select count(*) from market_listings where seller_id=? and status='open'",(uid,))>=10: raise Err("Bir vaqtda ko‘pi bilan 10 ta e’lon joylash mumkin")
+            if it["qty"]==1: x("delete from inventory where user_id=? and item_id=?",(uid,iid))
+            else: x("update inventory set qty=qty-1 where user_id=? and item_id=?",(uid,iid))
+            x("insert into market_listings(seller_id,item_id,price,qty,status,created) values(?,?,?,1,'open',?)",(uid,iid,price,now))
+        elif op=="market_buy":
+            lid=int(b.get("id",0)); l=q("select * from market_listings where id=? and status='open'",(lid,),True)
+            if not l or l["seller_id"]==uid: raise Err("E’lon mavjud emas")
+            if u["balance"]<l["price"]: raise Err("Coin yetarli emas")
+            x("update market_listings set status='sold' where id=? and status='open'",(lid,))
+            if q("select changes() n",one=True)["n"]!=1: raise Err("E’lon allaqachon sotilgan")
+            x("update users set balance=balance-? where id=?",(l["price"],uid)); x("update users set balance=balance+? where id=?",(l["price"],l["seller_id"]))
+            x("insert into inventory(user_id,item_id,qty) values(?,?,1) on conflict(user_id,item_id) do update set qty=qty+1",(uid,l["item_id"]))
+        elif op=="tournament_score":
+            raise Err("Turnir ochkolari faqat haqiqiy o‘yin bosishlari orqali beriladi")
+        elif op=="wheel_spin":
+            if q("select 1 from wheel_claims where user_id=? and day=?",(uid,today()),True): raise Err("Bugungi aylantirish ishlatildi")
+            reward=random.choices([100,200,300,500,1000],weights=[35,30,20,12,3])[0]
+            x("insert into wheel_claims(user_id,day,reward,claimed) values(?,?,?,?)",(uid,today(),reward,now))
+            gain(uid,reward)
+            x("insert into notifications(user_id,title,body,created) values(?,?,?,?)",(uid,"Lucky Wheel",f"Omad g‘ildiragidan +{reward} coin yutdingiz!",now))
+        elif op=="notice_seen":
+            x("update notifications set seen=1 where id=? and user_id=?",(int(b.get("id",0)),uid))
+        else: raise Err("Noma’lum amal")
+    return jsonify(balance=get(uid)["balance"],world=True)
+
+@app.post("/api/support")
+@auth
+def api_support():
+    b=request.json or {}; subject=str(b.get("subject","")).strip()[:80]; msg=str(b.get("message","")).strip()[:1500]
+    if len(subject)<3 or len(msg)<8: raise Err("Mavzu va xabarni to‘liq yozing")
+    tid=x("insert into support_tickets(user_id,subject,message,created) values(?,?,?,?)",(g.uid,subject,msg,time.time()))
+    notify_admins(f"🆘 Yangi murojaat #{tid} — <code>{g.uid}</code>: {_html.escape(subject)}")
+    return jsonify(ok=True,id=tid)
+
+@app.get("/api/notifications")
+@auth
+def api_notifications():
+    return jsonify([dict(r) for r in q("select * from notifications where user_id=? order by id desc limit 30",(g.uid,))])
+
+@app.get("/api/adm/world")
+@adm
+def api_adm_world():
+    return jsonify(quests=[dict(r) for r in q("select * from world_quests order by id desc")],
+                   items=[dict(r) for r in q("select * from game_items order by id desc")],
+                   events=[dict(r) for r in q("select * from live_events order by id desc")],
+                   tournaments=[dict(r) for r in q("select * from tournaments order by id desc")],
+                   tickets=[dict(r) for r in q("select t.*,u.name,u.username from support_tickets t join users u on u.id=t.user_id order by t.id desc limit 100")])
+
+@app.post("/api/adm/world")
+@adm
+def api_adm_world_save():
+    b=request.json or {}; op=b.get("op")
+    if op=="quest":
+        title=str(b.get("title"," ")).strip()[:80]; kind=str(b.get("kind","taps")); period=str(b.get("period","daily")); goal=int(b.get("goal",1)); reward=int(b.get("reward",0))
+        if len(title)<3 or kind not in ("taps","login","refs","earned","balance") or period not in ("daily","weekly","once") or not 1<=goal<=100000000 or not 0<=reward<=100000000: raise Err("Missiya ma’lumotlarini tekshiring")
+        x("insert into world_quests(title,descr,icon,kind,goal,reward,period) values(?,?,?,?,?,?,?)",(title,str(b.get("descr",""))[:200],str(b.get("icon","🎯"))[:8],kind,goal,reward,period))
+    elif op=="item":
+        title=str(b.get("title","")).strip()[:60]; slug=re.sub(r"[^a-z0-9_-]","",str(b.get("slug","")).lower())[:40]
+        if len(title)<2 or len(slug)<2: raise Err("Buyum nomi yoki kodi noto‘g‘ri")
+        x("insert into game_items(slug,title,descr,icon,price,rarity,active) values(?,?,?,?,?,?,1) on conflict(slug) do update set title=excluded.title,descr=excluded.descr,icon=excluded.icon,price=excluded.price,rarity=excluded.rarity,active=1",
+          (slug,title,str(b.get("descr",""))[:180],str(b.get("icon","✨")[:8]),max(0,int(b.get("price",0))),str(b.get("rarity","common"))[:20]))
+    elif op=="event":
+        title=str(b.get("title","")).strip()[:80]
+        if len(title)<3: raise Err("Tadbir nomini kiriting")
+        x("insert into live_events(title,descr,icon,reward,starts,ends,active) values(?,?,?,?,?,?,1)",
+          (title,str(b.get("descr",""))[:300],str(b.get("icon","🎉")[:8]),max(0,int(b.get("reward",0))),float(b.get("starts",time.time())),float(b.get("ends",time.time()+86400))))
+    elif op=="tournament":
+        title=str(b.get("title","")).strip()[:80]
+        if len(title)<3: raise Err("Musobaqa nomini kiriting")
+        x("insert into tournaments(title,descr,starts,ends,reward,active) values(?,?,?,?,?,1)",
+          (title,str(b.get("descr",""))[:300],float(b.get("starts",time.time())),float(b.get("ends",time.time()+86400)),max(0,int(b.get("reward",0)))))
+    elif op=="reply":
+        tid=int(b.get("id",0)); reply=str(b.get("reply","")).strip()[:1000]
+        t=q("select * from support_tickets where id=?",(tid,),True)
+        if not t: raise Err("Murojaat topilmadi")
+        x("update support_tickets set reply=?,status='answered' where id=?",(reply,tid))
+        x("insert into notifications(user_id,title,body,created) values(?,?,?,?)",(t["user_id"],"Yordam markazi javobi",reply,time.time()))
+        send(t["user_id"],"💬 <b>Yordam markazi javobi</b>\n"+_html.escape(reply))
+    elif op=="toggle":
+        table=str(b.get("table","")); rid=int(b.get("id",0)); active=int(bool(b.get("active")))
+        if table not in ("game_items","live_events","tournaments","world_quests"): raise Err("Noto‘g‘ri bo‘lim")
+        x(f"update {table} set active=? where id=?",(active,rid))
+    else: raise Err("Noma’lum amal")
+    return jsonify(ok=True)
+
+
+@app.post("/api/adm/tournament/<int:tid>/finish")
+@adm
+def api_adm_tournament_finish(tid):
+    with LK:
+        t=q("select * from tournaments where id=?",(tid,),True)
+        if not t or not t["active"]: raise Err("Turnir faol emas yoki yakunlangan")
+        winners=q("select s.user_id,s.score,u.name from tournament_scores s join users u on u.id=s.user_id where s.tournament_id=? order by s.score desc,s.updated asc limit 3",(tid,))
+        for i,w in enumerate(winners):
+            reward=int(t["reward"]*[0.6,0.3,0.1][i])
+            if reward:
+                gain(w["user_id"],reward)
+                x("insert into notifications(user_id,title,body,created) values(?,?,?,?)",(w["user_id"],"Turnir natijasi",f"{t['title']}: {i+1}-o‘rin, +{reward} coin",time.time()))
+        x("update tournaments set active=0,ends=? where id=?",(time.time(),tid))
+    return jsonify(winners=[dict(w) for w in winners])
+
 HTML = r"""<!DOCTYPE html><html lang="uz"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>AKCOIN · Digital Universe</title>
@@ -1480,6 +1801,10 @@ button{font-family:inherit}
 @media(max-width:600px){.orb{filter:blur(68px);opacity:.7}.bg-ring{width:145vw;top:43%}.bg-aurora{opacity:.48}.bg-stars{opacity:.65}}
 @media(prefers-reduced-motion:reduce){.orb{animation:none!important}}
 
+
+.world-hero{padding:22px 18px;margin:4px 0 18px;border:1px solid rgba(112,245,222,.24);border-radius:24px;background:radial-gradient(ellipse at 80% 10%,rgba(92,104,255,.28),transparent 50%),linear-gradient(135deg,rgba(18,49,66,.94),rgba(14,21,44,.96));box-shadow:0 18px 50px rgba(0,0,0,.22)}
+.world-hero h1{font:900 34px Unbounded,sans-serif;letter-spacing:-2px;margin:8px 0}.world-hero h1 span{color:#b8f66d}.world-hero p{color:#a7bacb;margin:0 0 18px}.world-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.world-kpis div{padding:10px;border-radius:13px;background:rgba(255,255,255,.055)}.world-kpis small,.world-kpis b{display:block}.world-kpis small{font-size:9px;color:#9eb2c5}.world-kpis b{font-size:12px;margin-top:5px}.world-icon{width:42px;height:42px;display:grid;place-items:center;border-radius:14px;background:linear-gradient(135deg,rgba(112,245,222,.16),rgba(158,126,255,.16));font-size:22px;flex-shrink:0}.world-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.item-card{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px}.item-card small{color:var(--muted)}.item-card .btn{width:100%;font-size:10px}.season-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:14px}.season-node{border:1px solid var(--line);background:rgba(255,255,255,.045);border-radius:12px;padding:9px 3px;color:var(--text);display:grid;gap:5px;justify-items:center}.season-node small{font-size:9px;color:var(--muted)}.season-node b{font-size:19px}.season-node.claimed{border-color:rgba(184,246,109,.5);background:rgba(184,246,109,.1)}.vip-card{background:radial-gradient(ellipse at 85% 0,rgba(184,246,109,.18),transparent 55%),rgba(255,255,255,.04)}
+
 </style></head><body>
 <div id="bg"><div class="bg-aurora"></div><div class="bg-stars"></div><div class="bg-ring"></div><div class="bg-spark"></div><div class="orb o1"></div><div class="orb o2"></div></div>
 <div id="view"></div><nav id="nav"></nav><div id="sheet"><div class="sh" id="shc"></div></div><div id="toast"></div>
@@ -1512,9 +1837,9 @@ const coinSVG=c=>`<svg viewBox="0 0 200 200"><defs><radialGradient id="cgf" cx="
 
 /* NAV */
 const IC={boost:'<path d="M12 2.5c3 2.4 4.6 6 4.1 9.8l-2.5 3.2h-3.2L7.9 12.3C7.4 8.5 9 4.9 12 2.5z"/><circle cx="12" cy="9.5" r="1.7"/><path d="M8 13.5l-3 3 2.2.6M16 13.5l3 3-2.2.6M10.5 19l1.5 3 1.5-3"/>',tasks:'<rect x="5" y="4" width="14" height="17" rx="3"/><path d="M9 4V3h6v1M9 13l2.2 2.2L15.5 11"/>',tap:'<circle cx="12" cy="12" r="3.2"/><circle cx="12" cy="12" r="8"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22"/>',auction:'<path d="M8 4h8v5a4 4 0 01-8 0zM8 6H5v1a3 3 0 003 3M16 6h3v1a3 3 0 01-3 3M12 13v4M8.5 21h7M9.5 17h5"/>',profile:'<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>'};
-const TABS=[['boost','Boost'],['tasks','Vazifalar'],['tap','Bosish'],['auction','Auksion'],['profile','Profil']];
+const TABS=[['world','World'],['boost','Boost'],['tasks','Vazifalar'],['tap','Bosish'],['auction','Auksion'],['profile','Profil']];
 const navR=()=>{$('#nav').innerHTML=TABS.map(([k,l])=>k==='tap'?`<button class="mid ${tab===k?'on':''}" onclick="go('${k}')"><i><svg viewBox="0 0 24 24">${IC[k]}</svg></i>${l}</button>`:`<button class="${k===tab?'on':''}" onclick="go('${k}')"><svg viewBox="0 0 24 24">${IC[k]}</svg>${l}</button>`).join('')};
-function go(t){flush();clearInterval(BCT);tab=t;navR();closeSheet();if(t!=='tap')view('<div class="spn"></div>');const f={tap:tapV,tasks:taskV,boost:boostV,auction:auV,profile:profV}[t];Promise.resolve().then(f).catch(e=>{if(e.message==='maint')return maintV();toast(e.message)})}
+function go(t){flush();clearInterval(BCT);tab=t;navR();closeSheet();if(t!=='tap')view('<div class="spn"></div>');const f={world:worldV,tap:tapV,tasks:taskV,boost:boostV,auction:auV,profile:profV}[t];Promise.resolve().then(f).catch(e=>{if(e.message==='maint')return maintV();toast(e.message)})}
 const maintV=()=>view('<div class="mt">🛠<br>Texnik ishlar<br><small>Tez orada qaytamiz</small></div>');
 
 /* BOSISH */
@@ -1601,6 +1926,7 @@ async function abuy(){try{const r=await api(`/api/auction/${AQ.id}/buy`,{qty:AQ.
 /* PROFIL */
 function profV(){view(`<div class="profile-label"><span class="brandmark smallmark">A</span><span>PLAYER IDENTITY</span><i></i></div><div class="ph">${av('')}<h2>${esc(S.name)}</h2><small>${S.username?'@'+esc(S.username):'ID '+S.id}</small><span class="lv">${esc(S.lvl.name)}</span></div>
  <div class="card balc"><small>Balans</small><div class="big">${mc()}<b>${N(S.balance)}</b></div><small>Jami topilgan: ${N(S.earned)} · Do‘stlar: ${S.refs}</small></div><div class="profile-kpis"><div><small>TOPILGAN</small><b>${K(S.earned)}</b></div><div><small>TAKLIFLAR</small><b>${N(S.refs)}</b></div><div><small>DARAJA</small><b>${esc(S.lvl.name)}</b></div></div>
+ <div class="card row sb"><div class="gr"><b>🎨 PROFILE STUDIO</b><small>${S.equipped?esc(S.equipped.icon)+' '+esc(S.equipped.title):'Profil buyumlari tanlanmagan'}</small></div><button class="btn tq" onclick="studioV()">OCHISH</button></div>
  <h3>Tezkor amallar</h3><div class="grid"><div class="card click" onclick="promo()"><div class="ic g">🎟</div>Promokod</div><div class="card click" onclick="sendV()"><div class="ic t">📤</div>Tanga yuborish</div>
  <div class="card click" onclick="rate('balance')"><div class="ic v">📊</div>Reyting</div><div class="card click" onclick="paid()"><div class="ic c">🏅</div>Pullik xizmatlar</div></div>`+(CFG.is_admin?`<button class="btn tq wide" style="margin-top:14px" onclick="admV()">⚙️ Admin panel</button>`:''))}
 function promo(){sheet(`<h3 style="margin-top:0">🎟 Promokod</h3><input id="pc" class="inp" placeholder="KODNI KIRITING" style="text-transform:uppercase"><button class="btn gold wide" onclick="dopromo()">Faollashtirish</button>`)}
@@ -1610,6 +1936,34 @@ async function dosend(){try{const r=await api('/api/send',{to:$('#st').value,amo
 async function rate(by){const r=await api('/api/rating?by='+by);const fv={balance:u=>u.balance,refs:u=>u.refs,earned:u=>u.earned}[by];
  view(hd('Reyting','profV()')+`<div class="seg">${[['balance','Balans'],['earned','Topilgan'],['refs','Do‘stlar']].map(([k,l])=>`<button class="${k===by?'on':''}" onclick="rate('${k}')">${l}</button>`).join('')}</div><div class="card row sb meh"><b>Sizning o‘rningiz</b><b class="dsp">#${r.me}</b></div>`+r.top.map((u,i)=>`<div class="card row ${u.id==S.id?'meh':''}"><b class="rk">${['🥇','🥈','🥉'][i]||i+1}</b><div class="gr"><b>${esc(u.name)}</b><small>${u.username?'@'+esc(u.username):''}</small></div><b class="dsp" style="font-size:13px">${K(fv(u))}</b></div>`).join(''))}
 function paid(){view(hd('Pullik xizmatlar','profV()')+CFG.paid.map(p=>`<div class="card row"><div class="ic c">${esc(p[0])}</div><div class="gr"><b>${esc(p[1])}</b><small>${esc(p[2])}</small></div><button class="btn gold" onclick="tg.openTelegramLink('https://t.me/${esc(CFG.admin)}')">Aloqa</button></div>`).join('')||'<p class="mut c">Yo‘q</p>')}
+
+
+let WD=null;
+async function worldV(){
+ WD=await api('/api/world');const w=WD;
+ view(`<div class="world-hero"><small>AKCOIN UNIVERSE · PLAYER HUB</small><h1>WORLD <span>2.0</span></h1><p>O‘yna · Rivojlan · Yut · Jamoa tuz</p><div class="world-kpis"><div><small>VIP</small><b>${w.vip.icon} ${w.vip.name}</b></div><div><small>SEASON XP</small><b>${N(w.season.xp)}</b></div><div><small>LEVEL</small><b>${w.season.level}/50</b></div></div></div>
+ <h3>🎯 QUEST WORLD · MISSIYALAR</h3>${w.quests.map(q=>`<div class="card row"><div class="world-icon">${esc(q.icon)}</div><div class="gr"><b>${esc(q.title)}</b><small>${esc(q.descr)} · ${q.progress}/${q.goal} · ${esc(q.period)}</small><div class="bar"><i style="width:${Math.min(100,q.progress/q.goal*100)}%"></i></div><small>+${N(q.reward)} coin</small></div>${q.claimed?'<span class="ok">✓</span>':q.ready?`<button class="btn gold" onclick="worldAct('quest_claim',{id:${q.id}})">OLISH</button>`:'<span class="chip">JARAYONDA</span>'}</div>`).join('')}
+ <h3>🎡 LUCKY WHEEL</h3><div class="card row sb"><div class="gr"><b>Kunlik omad g‘ildiragi</b><small>100–1 000 coin yutish imkoniyati</small></div><button class="btn gold" ${w.wheel_available?'':'disabled'} onclick="worldAct('wheel_spin',{})">${w.wheel_available?'AYLANTIRISH':'ERTAGA'}</button></div>
+ <h3>🛒 ITEM SHOP</h3><div class="world-grid">${w.items.map(i=>`<div class="card item-card"><div class="world-icon">${i.icon}</div><b>${esc(i.title)}</b><small>${esc(i.rarity)} · ${N(i.price)} coin</small><button class="btn gold" onclick="worldAct('item_buy',{id:${i.id}})">SOTIB OLISH</button></div>`).join('')}</div>
+ <h3>🎟 SEASON PASS</h3><div class="card"><div class="row sb"><b>${w.season.level}-bosqich</b><b>${N(w.season.xp)} XP</b></div><div class="bar"><i style="width:${w.season.xp%100}%"></i></div><div class="season-grid">${w.season.rewards.map(r=>`<button ${r.claimed?'disabled':''} class="season-node ${r.claimed?'claimed':''}" onclick="worldAct('season_claim',{level:${r.level}})"><small>LVL ${r.level}</small><b>🎁</b><small>+${N(r.reward)}</small></button>`).join('')}</div></div>
+ <h3>🏅 YUTUQLAR</h3>${w.achievements.map(a=>`<div class="card row"><div class="world-icon">${a.icon}</div><div class="gr"><b>${esc(a.title)}</b><small>${esc(a.descr)} · ${a.progress}/${a.target}</small><div class="bar"><i style="width:${a.progress/a.target*100}%"></i></div></div>${a.claimed?'<span class="ok">✓</span>':a.progress>=a.target?`<button class="btn gold" onclick="worldAct('achievement_claim',{id:${a.id}})">+${N(a.reward)}</button>`:'<span class="chip">LOCK</span>'}</div>`).join('')}
+ <h3>🎉 LIVE EVENTS</h3>${w.events.map(e=>`<div class="card row"><div class="world-icon">${e.icon}</div><div class="gr"><b>${esc(e.title)}</b><small>${esc(e.descr)} · ${cd(e.ends)}</small></div>${e.claimed?'<span class="ok">OLINGAN</span>':`<button class="btn gold" onclick="worldAct('event_claim',{id:${e.id}})">+${N(e.reward)}</button>`}</div>`).join('')||'<div class="card muted">Faol tadbir yo‘q</div>'}
+ <h3>🎒 INVENTORY</h3><div class="world-grid">${w.inventory.map(i=>`<div class="card item-card"><div class="world-icon">${i.icon}</div><b>${esc(i.title)}</b><small>x${i.qty} · ${esc(i.rarity)}</small><button class="btn" onclick="worldAct('item_equip',{id:${i.item_id}})">${i.equipped?'JIHOZLANGAN':'JIHOZLASH'}</button><button class="btn" onclick="marketSell(${i.item_id})">SOTUVGA</button></div>`).join('')||'<div class="card muted">Ombor bo‘sh</div>'}</div>
+ <h3>🛍 MARKETPLACE</h3>${w.listings.map(l=>`<div class="card row"><div class="world-icon">${l.icon}</div><div class="gr"><b>${esc(l.title)}</b><small>${esc(l.seller)}</small></div><b>${N(l.price)} A</b><button class="btn gold" onclick="worldAct('market_buy',{id:${l.id}})">OLISH</button></div>`).join('')||'<div class="card muted">E’lon yo‘q</div>'}
+ <h3>🛡 CLANS</h3>${w.my_clan?`<div class="card"><b>[${esc(w.my_clan.tag)}] ${esc(w.my_clan.name)}</b><small>${esc(w.my_clan.role)} · ${N(w.my_clan.contribution||0)} hissa</small><button class="btn danger wide" onclick="worldAct('clan_leave',{})">JAMOADAN CHIQISH</button></div>`:'<button class="btn gold wide" onclick="clanCreate()">＋ JAMOA YARATISH · 1 000 A</button>'}${w.clans.map(c=>`<div class="card row"><div class="gr"><b>[${esc(c.tag)}] ${esc(c.name)}</b><small>${c.members} a’zo · ${N(c.contribution||0)} jamoa ochkosi</small></div>${w.my_clan?'<span class="chip">MEMBER</span>':`<button class="btn tq" onclick="worldAct('clan_join',{id:${c.id}})">QO‘SHILISH</button>`}</div>`).join('')}
+ <h3>🏆 TOURNAMENTS</h3>${w.tournaments.map(t=>`<div class="card"><b>${esc(t.title)} · #${t.rank}</b><small>${esc(t.descr)} · ${cd(t.ends)}</small><div class="row sb"><b>${t.score} ochko</b><small>Ochko haqiqiy o‘yin bosishlaridan yig‘iladi</small></div></div>`).join('')||'<div class="card muted">Turnir yo‘q</div>'}
+ <h3>💎 VIP CLUB</h3><div class="card vip-card"><h2>${w.vip.icon} ${w.vip.name}</h2><div class="bar"><i style="width:${w.vip.progress}%"></i></div><small>${w.vip.next?N(w.vip.next)+' keyingi VIP chegarasi':'Maksimal VIP'}</small></div>
+ <h3>🤝 REFERRAL 2.0</h3><div class="card"><div class="row sb"><b>Taklif qilgan do‘stlar</b><b>${w.referrals.length}+</b></div><button class="btn gold wide" onclick="inv()">DO‘ST TAKLIF QILISH</button>${w.referrals.map(r=>`<div class="row sb"><span>${esc(r.name)}</span><small>${new Date(r.created*1000).toLocaleDateString()}</small></div>`).join('')||'<small>Hali takliflar yo‘q</small>'}</div>
+ <h3>🔔 XABARLAR</h3>${w.notifications.map(n=>`<div class="card row"><div class="gr"><b>${esc(n.title)}</b><small>${esc(n.body)}</small></div>${n.seen?'':`<button class="btn" onclick="worldAct('notice_seen',{id:${n.id}})">OK</button>`}</div>`).join('')||'<div class="card muted">Xabar yo‘q</div>'}
+ <h3>🆘 SUPPORT CENTER</h3><button class="btn gold wide" onclick="supportForm()">MUROJAAT YUBORISH</button>${w.support.map(t=>`<div class="card"><b>#${t.id} ${esc(t.subject)}</b><small>${esc(t.status)}</small>${t.reply?`<p>${esc(t.reply)}</p>`:''}</div>`).join('')}`);
+}
+async function worldAct(op,data){try{await api('/api/world/action',{op,...data});await refresh();closeSheet();toast('Bajarildi ✓');worldV()}catch(e){toast(e.message)}}
+function marketSell(id){sheet(`<h3>Buyumni sotuvga qo‘yish</h3><input id="market_price" class="inp" type="number" min="1" placeholder="Narx (coin)"><button class="btn gold wide" onclick="worldAct('market_sell',{id:${id},price:+$('#market_price').value})">E’LON BERISH</button>`)}
+function clanCreate(){sheet(`<h3>Yangi jamoa</h3><input id="cl_name" class="inp" placeholder="Jamoa nomi"><input id="cl_tag" class="inp" placeholder="TAG"><textarea id="cl_desc" class="inp" placeholder="Tavsif"></textarea><button class="btn gold wide" onclick="worldAct('clan_create',{name:$('#cl_name').value,tag:$('#cl_tag').value,descr:$('#cl_desc').value})">YARATISH · 1 000 A</button>`)}
+async function studioV(){try{const w=await api('/api/world');sheet(`<h3>🎨 Profile Studio</h3><p class="mut">Omboringizdagi buyumni tanlang. Tanlangan buyum profilingizda ko‘rinadi.</p>`+(w.inventory.map(i=>`<div class="card row"><div class="world-icon">${i.icon}</div><div class="gr"><b>${esc(i.title)}</b><small>${esc(i.rarity)}</small></div><button class="btn ${i.equipped?'tq':''}" onclick="studioEquip(${i.item_id})">${i.equipped?'TANLANGAN':'JIHOZLASH'}</button></div>`).join('')||'<p class="mut">Ombor bo‘sh. Item Shop’dan buyum oling.</p>'))}catch(e){toast(e.message)}}
+async function studioEquip(id){try{await api('/api/world/action',{op:'item_equip',id});await refresh();toast('Profil yangilandi');studioV()}catch(e){toast(e.message)}}
+function supportForm(){sheet(`<h3>🆘 Yordam markazi</h3><input id="sup_sub" class="inp" placeholder="Mavzu"><textarea id="sup_msg" class="inp" rows="5" placeholder="Xabaringiz"></textarea><button class="btn gold wide" onclick="supportSend()">YUBORISH</button>`)}
+async function supportSend(){try{await api('/api/support',{subject:$('#sup_sub').value,message:$('#sup_msg').value});closeSheet();toast('Murojaat yuborildi');worldV()}catch(e){toast(e.message)}}
 
 /* ═════════ ADMIN PANEL ═════════ */
 const fld=([k,l,t,o],v)=>`<div class="fg"><label>${l}</label>`+(t==='sel'?`<select class="inp" id="f_${k}">${(typeof o==='function'?o():o).map(([a,b])=>`<option value="${esc(a)}" ${String(a)===String(v)?'selected':''}>${esc(b)}</option>`).join('')}</select>`:t==='area'?`<textarea class="inp" id="f_${k}" rows="5">${esc(v)}</textarea>`:t==='dt'?`<input class="inp" id="f_${k}" type="datetime-local" value="${v}">`:`<input class="inp" id="f_${k}" type="${t==='int'||t==='float'?'number':'text'}" ${t==='float'?'step="any"':''} value="${esc(v)}">`)+`</div>`;
@@ -1625,7 +1979,7 @@ const ADM={
  paid:{add:'Xizmat qo‘shish',pk:'id',def:{icon:'⭐',sort:0,active:1},f:[['icon','Emoji','text'],['title','Nomi','text'],['descr','Tavsif','text'],['sort','Tartib','int'],['active','Holati','sel',ON]],row:r=>[r.icon,r.title,r.descr,r.active]},
  admins:{add:'Admin qo‘shish',pk:'id',man:1,def:{},f:[['id','Telegram ID','int'],['note','Izoh (ism)','text']],row:r=>['🛡',r.note||('ID '+r.id),String(r.id),1]}
 };
-const AT=[['dash','📊','Statistika'],['set','⚙️','Sozlamalar'],['tasks','🎯','Vazifalar'],['auctions','🏆','Auksion'],['promos','🎟','Promokod'],['svcs','🚀','Xizmatlar'],['orders','🛒','Buyurtmalar'],['users','👥','Foydalanuvchilar'],['bc','📣','Xabar'],['paid','💎','Pullik'],['admins','🛡','Adminlar'],['bk','💾','Zaxira']];
+const AT=[['dash','📊','Statistika'],['set','⚙️','Sozlamalar'],['tasks','🎯','Vazifalar'],['auctions','🏆','Auksion'],['promos','🎟','Promokod'],['svcs','🚀','Xizmatlar'],['orders','🛒','Buyurtmalar'],['users','👥','Foydalanuvchilar'],['bc','📣','Xabar'],['paid','💎','Pullik'],['admins','🛡','Adminlar'],['world','🌌','World Control'],['bk','💾','Zaxira']];
 function admV(t){clearInterval(BCT);if(t)ADT=t;
  view(`<div class="admin-head"><div class="eyebrow">OWNER WORKSPACE · LIVE CONTROL</div><h2>Boshqaruv markazi</h2><p>Botning barcha muhim bo‘limlari shu yerda. Foydalanuvchilar, balanslar, vazifalar, xizmatlar, buyurtmalar va ko‘rinadigan matnlarni boshqaring.</p><div class="admin-actions"><button class="btn tq" onclick="admV('dash')">▦ Umumiy ko‘rsatkichlar</button><button class="btn" onclick="admV('set')">⚙ Barcha sozlamalar</button></div></div><div class="atabs">${AT.map(([k,i,l])=>`<button class="at ${k===ADT?'on':''}" onclick="admV('${k}')">${i} ${l}</button>`).join('')}</div><div id="ac"><div class="spn"></div></div>`);
  admT(ADT).catch(e=>toast(e.message))}
@@ -1639,9 +1993,20 @@ async function admT(t){ADT=t;const c=$('#ac');if(!c)return;
  else if(t==='orders')return admOrders();
  else if(t==='users')return admUsers();
  else if(t==='bc'){c.innerHTML=`<div class="card"><div class="fg"><label>Matn (HTML: &lt;b&gt;qalin&lt;/b&gt;)</label><textarea id="b_t" class="inp" rows="5" placeholder="Xabar matni…"></textarea></div><div class="fg"><label>Rasm havolasi (ixtiyoriy)</label><input id="b_i" class="inp"></div><div class="fg"><label>Tugma matni (ixtiyoriy)</label><input id="b_bt" class="inp" placeholder="🚀 Ochish"></div><div class="fg"><label>Tugma havolasi (bo‘sh = ilovani ochadi)</label><input id="b_bu" class="inp"></div><div class="fg"><label>Kimlarga</label><select id="b_g" class="inp"><option value="all">Hammaga</option><option value="active">Oxirgi 7 kunda aktivlarga</option></select></div><button class="btn gold wide" onclick="bcGo()">📣 Yuborish</button><div id="bcs" style="margin-top:12px"></div></div>`;bcPoll()}
+ else if(t==='world'){const w=await api('/api/adm/world');c.innerHTML=`<div class="admin-tip">Missiyalar, buyumlar, tadbirlar, turnirlar va yordam murojaatlarini boshqaring.</div>
+ <h3>🎯 Missiyalar</h3>`+w.quests.map(q=>`<div class="card row"><div class="gr"><b>${esc(q.icon)} ${esc(q.title)}</b><small>${esc(q.kind)} · ${q.goal} · +${N(q.reward)} · ${esc(q.period)}</small></div><button class="btn" onclick="admWorldToggle('world_quests',${q.id},${q.active?0:1})">${q.active?'O‘CHIRISH':'YOQISH'}</button></div>`).join('')+`<div class="card"><h3>🎯 Missiya yaratish</h3><input id="wq_title" class="inp" placeholder="Nomi"><input id="wq_descr" class="inp" placeholder="Tavsif"><input id="wq_icon" class="inp" value="🎯"><select id="wq_kind" class="inp"><option value="taps">Bosishlar</option><option value="login">Kirish</option><option value="refs">Takliflar</option><option value="earned">Jami topilgan</option><option value="balance">Balans</option></select><input id="wq_goal" class="inp" type="number" placeholder="Maqsad"><input id="wq_reward" class="inp" type="number" placeholder="Mukofot"><select id="wq_period" class="inp"><option value="daily">Har kun</option><option value="weekly">Haftalik</option><option value="once">Bir marta</option></select><button class="btn gold wide" onclick="admWorldSave('quest')">MISSIYA QO‘SHISH</button></div>
+ <div class="card"><h3>🎒 Buyum yaratish</h3><input id="wi_slug" class="inp" placeholder="slug"><input id="wi_title" class="inp" placeholder="Nomi"><input id="wi_icon" class="inp" value="✨"><input id="wi_price" class="inp" type="number" placeholder="Narxi"><input id="wi_rarity" class="inp" value="rare"><input id="wi_descr" class="inp" placeholder="Tavsif"><button class="btn gold wide" onclick="admWorldSave('item')">SAQLASH</button></div>
+ <div class="card"><h3>🎉 Tadbir yaratish</h3><input id="we_title" class="inp" placeholder="Nomi"><input id="we_icon" class="inp" value="🎉"><input id="we_reward" class="inp" type="number" placeholder="Mukofot"><input id="we_descr" class="inp" placeholder="Tavsif"><button class="btn gold wide" onclick="admWorldSave('event')">24 SOATLIK TADBIR</button></div>
+ <div class="card"><h3>🏆 Turnir yaratish</h3><input id="wt_title" class="inp" placeholder="Nomi"><input id="wt_reward" class="inp" type="number" placeholder="Mukofot"><input id="wt_descr" class="inp" placeholder="Tavsif"><button class="btn gold wide" onclick="admWorldSave('tournament')">24 SOATLIK TURNIR</button></div>
+ <h3>🧰 Buyumlar</h3>`+w.items.map(i=>`<div class="card row"><div class="gr"><b>${esc(i.icon)} ${esc(i.title)}</b><small>${N(i.price)} coin · ${esc(i.rarity)}</small></div><button class="btn" onclick="admWorldToggle('game_items',${i.id},${i.active?0:1})">${i.active?'O‘CHIRISH':'YOQISH'}</button></div>`).join('')+`<h3>🎉 Tadbirlar</h3>`+w.events.map(e=>`<div class="card row"><div class="gr"><b>${esc(e.title)}</b><small>+${N(e.reward)}</small></div><button class="btn" onclick="admWorldToggle('live_events',${e.id},${e.active?0:1})">${e.active?'O‘CHIRISH':'YOQISH'}</button></div>`).join('')+`<h3>🧰 Buyumlar</h3>`+w.items.map(i=>`<div class="card row"><div class="gr"><b>${esc(i.icon)} ${esc(i.title)}</b><small>${N(i.price)} coin · ${esc(i.rarity)}</small></div><button class="btn" onclick="admWorldToggle('game_items',${i.id},${i.active?0:1})">${i.active?'O‘CHIRISH':'YOQISH'}</button></div>`).join('')+`<h3>🎉 Tadbirlar</h3>`+w.events.map(e=>`<div class="card row"><div class="gr"><b>${esc(e.title)}</b><small>+${N(e.reward)}</small></div><button class="btn" onclick="admWorldToggle('live_events',${e.id},${e.active?0:1})">${e.active?'O‘CHIRISH':'YOQISH'}</button></div>`).join('')+`<h3>🏆 Turnirlar</h3>`+w.tournaments.map(t=>`<div class="card row"><div class="gr"><b>${esc(t.title)}</b><small>Mukofot: ${N(t.reward)}</small></div><button class="btn gold" onclick="admTournamentFinish(${t.id})">YAKUNLASH</button></div>`).join('')+`<h3>📨 Murojaatlar</h3>`+w.tickets.map(t=>`<div class="card"><b>#${t.id} ${esc(t.subject)}</b><small>${esc(t.name)} · ${t.user_id} · ${esc(t.status)}</small><p>${esc(t.message)}</p><textarea class="inp" id="reply_${t.id}">${esc(t.reply||'')}</textarea><button class="btn tq wide" onclick="admWorldReply(${t.id})">JAVOB YUBORISH</button></div>`).join('')||'<div class="card muted">Murojaatlar yo‘q</div>'}
  else if(t==='bk'){c.innerHTML=`<div class="card"><b>💾 Baza zaxirasi</b><p><small>Render bepul rejimida disk o‘chib ketishi mumkin. Zaxirani Telegramga yuboring va vaqti-vaqti bilan saqlab turing.</small></p><button class="btn tq wide" onclick="bkGo()">Bazani menga yuborish</button></div><div class="card"><b>♻️ Tiklash</b><p><small>Zaxira faylini (.db) botga <code>/restore</code> izohi bilan yuboring.</small></p></div><div class="card"><b>🖼 Rasm yuklash</b><p><small>Botga oddiy rasm yuboring — u sizga havola beradi. Uni auksion yoki xabarga qo‘ying.</small></p></div><div class="card"><b>🛠 Texnik ishlar</b><p><small>Sozlamalar → «Texnik ishlar rejimi»ni yoqing — foydalanuvchilar uchun ilova vaqtincha yopiladi.</small></p></div>`}
  else if(t==='svcs'){await admLoad('plats');await admLoad('svcs');c.innerHTML=`<h3>Platformalar</h3><button class="addb" onclick="admForm('plats',null)">＋ Platforma qo‘shish</button><div id="l_plats">${admRows('plats')}</div><h3>Xizmatlar</h3><button class="addb" onclick="admForm('svcs',null)">＋ Xizmat qo‘shish</button><div id="l_svcs">${admRows('svcs')}</div>`}
  else{await admLoad(t);c.innerHTML=`<button class="addb" onclick="admForm('${t}',null)">＋ ${ADM[t].add}</button>`+admRows(t)}}
+async function admWorldToggle(table,id,active){try{await api('/api/adm/world',{op:'toggle',table,id,active});admV('world')}catch(e){toast(e.message)}}
+
+async function admWorldSave(op){try{let b={op};if(op==='quest')Object.assign(b,{title:$('#wq_title').value,descr:$('#wq_descr').value,icon:$('#wq_icon').value,kind:$('#wq_kind').value,goal:+$('#wq_goal').value,reward:+$('#wq_reward').value,period:$('#wq_period').value});if(op==='item')Object.assign(b,{slug:$('#wi_slug').value,title:$('#wi_title').value,icon:$('#wi_icon').value,price:+$('#wi_price').value,rarity:$('#wi_rarity').value,descr:$('#wi_descr').value});if(op==='event')Object.assign(b,{title:$('#we_title').value,icon:$('#we_icon').value,reward:+$('#we_reward').value,descr:$('#we_descr').value});if(op==='tournament')Object.assign(b,{title:$('#wt_title').value,reward:+$('#wt_reward').value,descr:$('#wt_descr').value});await api('/api/adm/world',b);toast('Saqlandi');admV('world')}catch(e){toast(e.message)}}
+async function admTournamentFinish(id){ask('Turnirni yakunlab, sovrinlarni TOP-3 ga taqsimlaysizmi?',async()=>{try{await api('/api/adm/tournament/'+id+'/finish',{});toast('Turnir yakunlandi');admV('world')}catch(e){toast(e.message)}})}
+async function admWorldReply(id){try{await api('/api/adm/world',{op:'reply',id,reply:$('#reply_'+id).value});toast('Javob yuborildi');admV('world')}catch(e){toast(e.message)}}
 const admLoad=async k=>{ADMC[k]=await api('/api/adm/list/'+k)};
 function admRows(k){const C=ADM[k],L=ADMC[k]||[];return L.map((r,i)=>{const [ic,t,s,on]=C.row(r);return `<div class="card row click admin-item ${on===0?'dim':''}" onclick="admForm('${k}',${i})"><div class="ic t">${esc(ic)}</div><div class="gr"><b>${esc(t)}</b><small>${esc(s)}</small></div><span class="mut">✎</span></div>`}).join('')||'<div class="admin-empty">Hozircha ma’lumot yo‘q.<br>Yuqoridagi tugma orqali yangisini qo‘shing.</div>'}
 function admForm(kind,i){const C=ADM[kind],r=i===null?Object.assign({},C.def||{}):ADMC[kind][i];if(i===null&&kind==='auctions')r.ends=Date.now()/1000+7*86400;if(i===null&&kind==='svcs'&&ADMC.plats&&ADMC.plats[0])r.plat=ADMC.plats[0].slug;
